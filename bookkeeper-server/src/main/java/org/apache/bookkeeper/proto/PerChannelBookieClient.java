@@ -27,6 +27,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.ExtensionRegistry;
+import org.apache.bookkeeper.auth.ClientAuthProvider;
 import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.BookKeeperClientStats;
 import org.apache.bookkeeper.conf.ClientConfiguration;
@@ -119,14 +121,23 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
     final ReentrantReadWriteLock closeLock = new ReentrantReadWriteLock();
     private final ClientConfiguration conf;
 
+    private final ClientAuthProvider.Factory authProviderFactory;
+    private final ExtensionRegistry extRegistry;
+
     public PerChannelBookieClient(OrderedSafeExecutor executor, ClientSocketChannelFactory channelFactory,
-                                  BookieSocketAddress addr) {
-        this(new ClientConfiguration(), executor, channelFactory, addr, null, NullStatsLogger.INSTANCE);
+                                  BookieSocketAddress addr,
+                                  ClientAuthProvider.Factory authProviderFactory,
+                                  ExtensionRegistry extRegistry) {
+        this(new ClientConfiguration(), executor, channelFactory, addr, null,
+             authProviderFactory, extRegistry, NullStatsLogger.INSTANCE);
     }
 
     public PerChannelBookieClient(ClientConfiguration conf, OrderedSafeExecutor executor,
                                   ClientSocketChannelFactory channelFactory, BookieSocketAddress addr,
-                                  HashedWheelTimer requestTimer, StatsLogger parentStatsLogger) {
+                                  HashedWheelTimer requestTimer,
+                                  ClientAuthProvider.Factory authProviderFactory,
+                                  ExtensionRegistry extRegistry,
+                                  StatsLogger parentStatsLogger) {
         this.conf = conf;
         this.addr = addr;
         this.executor = executor;
@@ -135,6 +146,9 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         this.requestTimer = requestTimer;
         this.addEntryTimeout = conf.getAddEntryTimeout();
         this.readEntryTimeout = conf.getReadEntryTimeout();
+
+        this.authProviderFactory = authProviderFactory;
+        this.extRegistry = extRegistry;
 
         StringBuilder nameBuilder = new StringBuilder();
         nameBuilder.append(addr.getHostname().replace('.', '_').replace('-', '_'))
@@ -621,8 +635,9 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
 
         pipeline.addLast("lengthbasedframedecoder", new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, 0, 4, 0, 4));
         pipeline.addLast("lengthprepender", new LengthFieldPrepender(4));
-        pipeline.addLast("bookieProtoEncoder", new BookieProtoEncoding.RequestEncoder());
-        pipeline.addLast("bookieProtoDecoder", new BookieProtoEncoding.ResponseDecoder());
+        pipeline.addLast("bookieProtoEncoder", new BookieProtoEncoding.RequestEncoder(extRegistry));
+        pipeline.addLast("bookieProtoDecoder", new BookieProtoEncoding.ResponseDecoder(extRegistry));
+        pipeline.addLast("authHandler", new AuthHandler.ClientSideHandler(authProviderFactory, txnIdGenerator));
         pipeline.addLast("mainhandler", this);
         return pipeline;
     }
@@ -661,6 +676,16 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         if (t instanceof CorruptedFrameException || t instanceof TooLongFrameException) {
             LOG.error("Corrupted frame received from bookie: {}",
                       e.getChannel().getRemoteAddress());
+            return;
+        }
+
+        if (t instanceof AuthHandler.AuthenticationException) {
+            LOG.error("Error authenticating connection", t);
+            errorOutOutstandingEntries(BKException.Code.UnauthorizedAccessException);
+            Channel c = ctx.getChannel();
+            if (c != null) {
+                closeChannel(c);
+            }
             return;
         }
 
