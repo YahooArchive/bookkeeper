@@ -139,9 +139,7 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
      */
     protected void startBKCluster() throws Exception {
         baseClientConf.setZkServers(zkUtil.getZooKeeperConnectString());
-        if (numBookies > 0) {
-            bkc = new BookKeeperTestClient(baseClientConf);
-        }
+        bkc = new BookKeeperTestClient(baseClientConf);
 
         // Create Bookie Servers (B1, B2, B3)
         for (int i = 0; i < numBookies; i++) {
@@ -184,6 +182,10 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
         int port = PortManager.nextFreePort();
         return newServerConfiguration(port, zkUtil.getZooKeeperConnectString(),
                                       f, new File[] { f });
+    }
+
+    protected ClientConfiguration newClientConfiguration() {
+        return new ClientConfiguration(baseConf);
     }
 
     protected ServerConfiguration newServerConfiguration(int port, String zkServers, File journalDir, File[] ledgerDirs) {
@@ -402,6 +404,9 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
     protected BookieServer startBookie(ServerConfiguration conf)
             throws Exception {
         BookieServer server = new BookieServer(conf);
+        bsConfs.add(conf);
+        bs.add(server);
+
         server.start();
 
         int port = conf.getBookiePort();

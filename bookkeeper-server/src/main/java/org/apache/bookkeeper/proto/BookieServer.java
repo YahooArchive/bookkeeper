@@ -31,32 +31,33 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import org.apache.zookeeper.KeeperException;
-
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.BookieException;
 import org.apache.bookkeeper.bookie.ExitCode;
+import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.jmx.BKMBeanRegistry;
+import org.apache.bookkeeper.proto.BookieProtocol.PacketHeader;
+import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
+import org.apache.bookkeeper.proto.DataFormats.AuthMessage;
 import org.apache.bookkeeper.proto.NIOServerFactory.Cnxn;
 import org.apache.bookkeeper.replication.AutoRecoveryMain;
 import org.apache.bookkeeper.replication.ReplicationException.CompatibilityException;
 import org.apache.bookkeeper.replication.ReplicationException.UnavailableException;
 import org.apache.bookkeeper.util.MathUtils;
-
-import com.google.common.annotations.VisibleForTesting;
-
-import static org.apache.bookkeeper.proto.BookieProtocol.PacketHeader;
-import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.cli.BasicParser;
-import org.apache.commons.cli.Options;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.codec.binary.Hex;
-
+import org.apache.commons.configuration.ConfigurationException;
+import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.protobuf.ByteString;
 
 /**
  * Implements the server-side part of the BookKeeper protocol.
@@ -381,6 +382,43 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
         }
     }
 
+
+    private void writeAuthMessage(AuthMessage am, Cnxn src) {
+        int totalSize = 4 /*header size*/ + am.getSerializedSize();
+
+        ByteBuffer buf = ByteBuffer.allocate(totalSize);
+        buf.putInt(new PacketHeader(BookieProtocol.CURRENT_PROTOCOL_VERSION,
+                                    BookieProtocol.AUTH,
+                                    BookieProtocol.FLAG_NONE).toInt());
+        buf.put(am.toByteArray());
+        buf.flip();
+
+        src.sendResponse(buf);
+    }
+
+    private void handleAuthMessage(AuthMessage am, final Cnxn src) {
+        if (!am.hasAuthPluginName()
+            || !am.getAuthPluginName().equals(src.getAuthPluginName())) {
+            LOG.error("Received message from incompatible auth plugin. Local = {}, Remote = {}",
+                      src.getAuthPluginName(), am.getAuthPluginName());
+            src.close();
+            return;
+        }
+
+        GenericCallback cb = new GenericCallback<AuthMessage>() {
+            public void operationComplete(int rc, AuthMessage newam) {
+                if (rc != BKException.Code.OK) {
+                    LOG.error("Error processing auth message, closing connection");
+                    src.close();
+                    return;
+                }
+                writeAuthMessage(newam, src);
+            }
+        };
+
+        src.getAuthProvider().process(am, cb);
+    }
+
     public void processPacket(ByteBuffer packet, Cnxn src) {
         PacketHeader h = PacketHeader.fromInt(packet.getInt());
 
@@ -421,6 +459,25 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
             return;
         }
         short flags = h.getFlags();
+
+        // make sure client is authenticated before allowing anything
+        if (!src.isAuthenticated()) {
+            try {
+                if (h.getOpCode() == BookieProtocol.AUTH) {
+                    ByteString buf = ByteString.copyFrom(packet);
+                    AuthMessage.Builder builder = AuthMessage.newBuilder();
+                    builder.mergeFrom(buf, src.getExtentionRegistry());
+                    handleAuthMessage(builder.build(), src);
+                    return;
+                }
+            } catch (IOException ioe) {
+                // allow to fall through to send EUA back to client
+            }
+            src.sendResponse(buildResponse(BookieProtocol.EUA, h.getVersion(), h.getOpCode(),
+                                               ledgerId, entryId));
+            return;
+        }
+
         switch (h.getOpCode()) {
         case BookieProtocol.ADDENTRY:
             statType = BKStats.STATS_ADD;

@@ -33,14 +33,19 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.bookkeeper.auth.AuthProviderFactoryFactory;
+import org.apache.bookkeeper.auth.BookieAuthProvider;
 import org.apache.bookkeeper.bookie.Bookie;
+import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.conf.ServerConfiguration;
-
+import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.protobuf.ExtensionRegistry;
 
 /**
  * This class handles communication with clients using NIO. There is one Cnxn
@@ -80,11 +85,18 @@ public class NIOServerFactory extends Thread {
     private Object suspensionLock = new Object();
     private boolean suspended = false;
 
+    final ExtensionRegistry extRegistry;
+    final BookieAuthProvider.Factory authProviderFactory;
+
     public NIOServerFactory(ServerConfiguration conf, PacketProcessor processor) throws IOException {
         super("NIOServerFactory-" + conf.getBookiePort());
         setDaemon(true);
         this.processor = processor;
         this.conf = conf;
+
+        extRegistry = ExtensionRegistry.newInstance();
+        authProviderFactory = AuthProviderFactoryFactory.newBookieAuthProviderFactory(conf, extRegistry);
+
         this.ss = ServerSocketChannel.open();
         if (conf.getListeningInterface() == null) {
             // listen on all interfaces
@@ -224,6 +236,9 @@ public class NIOServerFactory extends Thread {
         LinkedBlockingQueue<ByteBuffer> outgoingBuffers = new LinkedBlockingQueue<ByteBuffer>();
 
         int sessionTimeout;
+
+        AtomicBoolean authenticated = new AtomicBoolean(false);
+        final BookieAuthProvider authProvider;
 
         void doIO(SelectionKey k) throws InterruptedException {
             try {
@@ -399,6 +414,19 @@ public class NIOServerFactory extends Thread {
 
             lenBuffer.clear();
             incomingBuffer = lenBuffer;
+
+            authProvider = authProviderFactory.newProvider(
+                    getRemoteAddress(),
+                    new GenericCallback<Void>() {
+                        public void operationComplete(int rc, Void v) {
+                            if (rc == BKException.Code.OK) {
+                                authenticated.set(true);
+                            } else {
+                                LOG.error("Authorization failed");
+                                // close();
+                            }
+                        }
+                    });
         }
 
         @Override
@@ -518,6 +546,22 @@ public class NIOServerFactory extends Thread {
 
         public InetSocketAddress getRemoteAddress() {
             return (InetSocketAddress) sock.socket().getRemoteSocketAddress();
+        }
+
+        BookieAuthProvider getAuthProvider() {
+            return authProvider;
+        }
+
+        String getAuthPluginName() {
+            return authProviderFactory.getPluginName();
+        }
+
+        ExtensionRegistry getExtentionRegistry() {
+            return extRegistry;
+        }
+
+        boolean isAuthenticated() {
+            return authenticated.get();
         }
 
         private class CnxnStats {

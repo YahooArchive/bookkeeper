@@ -88,6 +88,8 @@ public abstract class BKException extends Exception {
             return new BKUnclosedFragmentException();
         case Code.WriteOnReadOnlyBookieException:
             return new BKWriteOnReadOnlyBookieException();
+        case Code.AuthTimeoutException:
+            return new BKAuthTimeoutException();
         default:
             return new BKIllegalOpException();
         }
@@ -117,6 +119,7 @@ public abstract class BKException extends Exception {
         int ProtocolVersionException = -16;
         int MetadataVersionException = -17;
         int MetaStoreException = -18;
+        int AuthTimeoutException = -19;
 
         int IllegalOpException = -100;
         int LedgerFencedException = -101;
@@ -181,6 +184,8 @@ public abstract class BKException extends Exception {
             return "Attempting to use an unclosed fragment; This is not safe";
         case Code.WriteOnReadOnlyBookieException:
             return "Attempting to write on ReadOnly bookie";
+        case Code.AuthTimeoutException:
+            return "Timed out while authenticating";
         default:
             return "Invalid operation";
         }
@@ -321,6 +326,12 @@ public abstract class BKException extends Exception {
     public static class BKWriteOnReadOnlyBookieException extends BKException {
         public BKWriteOnReadOnlyBookieException() {
             super(Code.WriteOnReadOnlyBookieException);
+        }
+    }
+        
+    public static class BKAuthTimeoutException extends BKException {
+        public BKAuthTimeoutException() {
+            super(Code.AuthTimeoutException);
         }
     }
 }
