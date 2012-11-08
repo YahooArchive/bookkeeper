@@ -70,6 +70,10 @@ public class ClientConfiguration extends AbstractConfiguration {
     // Ensemble Placement Policy
     protected final static String ENSEMBLE_PLACEMENT_POLICY = "ensemblePlacementPolicy";
 
+    // Client auth provider factory class name
+    protected final static String CLIENT_AUTH_PROVIDER_FACTORY_CLASS
+        = "clientAuthProviderFactoryClass";
+
     /**
      * Construct a default client-side configuration
      */
@@ -618,5 +622,29 @@ public class ClientConfiguration extends AbstractConfiguration {
     public ClientConfiguration setEnsemblePlacementPolicy(Class<? extends EnsemblePlacementPolicy> policyClass) {
         setProperty(ENSEMBLE_PLACEMENT_POLICY, policyClass.getName());
         return this;
+    }
+
+    /*
+     * Set the client authentication provider factory class name.
+     * If this is not set, no authentication will be used
+     *
+     * @param factoryClass
+     *          the client authentication provider factory class name
+     * @return client configuration
+     */
+    public ClientConfiguration setClientAuthProviderFactoryClass(
+            String factoryClass) {
+        setProperty(CLIENT_AUTH_PROVIDER_FACTORY_CLASS, factoryClass);
+        return this;
+    }
+
+    /**
+     * Get the client authentication provider factory class name.
+     * If this returns null, no authentication will take place.
+     *
+     * @return the client authentication provider factory class name or null.
+     */
+    public String getClientAuthProviderFactoryClass() {
+        return getString(CLIENT_AUTH_PROVIDER_FACTORY_CLASS, null);
     }
 }
