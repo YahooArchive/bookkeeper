@@ -21,33 +21,36 @@ package org.apache.bookkeeper.proto;
  *
  */
 
-import org.junit.*;
-import java.net.InetSocketAddress;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.Executors;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import java.nio.ByteBuffer;
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
-import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.auth.AuthProviderFactoryFactory;
+import org.apache.bookkeeper.auth.ClientAuthProvider;
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.client.BKException;
+import org.apache.bookkeeper.conf.ClientConfiguration;
+import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback;
 import org.apache.bookkeeper.proto.PerChannelBookieClient.ConnectionState;
 import org.apache.bookkeeper.test.BookKeeperClusterTestCase;
-import org.apache.bookkeeper.util.SafeRunnable;
 import org.apache.bookkeeper.util.OrderedSafeExecutor;
-import org.jboss.netty.channel.Channel;
+import org.apache.bookkeeper.util.SafeRunnable;
 import org.jboss.netty.buffer.ChannelBuffer;
+import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.socket.ClientSocketChannelFactory;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
-
+import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.protobuf.ExtensionRegistry;
 
 /**
  * Tests for PerChannelBookieClient. Historically, this class has
@@ -73,12 +76,17 @@ public class TestPerChannelBookieClient extends BookKeeperClusterTestCase {
             = new NioClientSocketChannelFactory(Executors.newCachedThreadPool(),
                                                 Executors.newCachedThreadPool());
         OrderedSafeExecutor executor = new OrderedSafeExecutor(1);
+        
+        ClientConfiguration conf = newClientConfiguration();
+        ExtensionRegistry registry = ExtensionRegistry.newInstance();
+        ClientAuthProvider.Factory authFactory = AuthProviderFactoryFactory
+                .newClientAuthProviderFactory(conf, registry);
 
         InetSocketAddress addr = getBookie(0);
         AtomicLong bytesOutstanding = new AtomicLong(0);
         for (int i = 0; i < 1000; i++) {
-            PerChannelBookieClient client = new PerChannelBookieClient(executor, channelFactory,
-                                                                       addr, bytesOutstanding);
+            PerChannelBookieClient client = new PerChannelBookieClient(conf, executor, channelFactory, addr,
+                    bytesOutstanding, authFactory, registry);
             client.connectIfNeededAndDoOp(new GenericCallback<Void>() {
                     @Override
                     public void operationComplete(int rc, Void result) {
@@ -111,11 +119,16 @@ public class TestPerChannelBookieClient extends BookKeeperClusterTestCase {
                                                 Executors.newCachedThreadPool());
         OrderedSafeExecutor executor = new OrderedSafeExecutor(1);
 
+        ClientConfiguration conf = newClientConfiguration();
+        ExtensionRegistry registry = ExtensionRegistry.newInstance();
+        ClientAuthProvider.Factory authFactory = AuthProviderFactoryFactory
+                .newClientAuthProviderFactory(conf, registry);
+
         InetSocketAddress addr = getBookie(0);
         AtomicLong bytesOutstanding = new AtomicLong(0);
         for (int i = 0; i < 100; i++) {
-            PerChannelBookieClient client = new PerChannelBookieClient(executor, channelFactory,
-                                                                       addr, bytesOutstanding);
+            PerChannelBookieClient client = new PerChannelBookieClient(conf, executor, channelFactory, addr,
+                    bytesOutstanding, authFactory, registry);
             for (int j = i; j < 10; j++) {
                 client.connectIfNeededAndDoOp(nullop);
             }
@@ -146,10 +159,15 @@ public class TestPerChannelBookieClient extends BookKeeperClusterTestCase {
                                                 Executors.newCachedThreadPool());
         OrderedSafeExecutor executor = new OrderedSafeExecutor(1);
         InetSocketAddress addr = getBookie(0);
+        
+        ClientConfiguration conf = newClientConfiguration();
+        ExtensionRegistry registry = ExtensionRegistry.newInstance();
+        ClientAuthProvider.Factory authFactory = AuthProviderFactoryFactory
+                .newClientAuthProviderFactory(conf, registry);
 
         AtomicLong bytesOutstanding = new AtomicLong(0);
-        final PerChannelBookieClient client = new PerChannelBookieClient(executor,
-                channelFactory, addr, bytesOutstanding);
+        final PerChannelBookieClient client = new PerChannelBookieClient(conf, executor, channelFactory, addr,
+                bytesOutstanding, authFactory, registry);
         final AtomicBoolean shouldFail = new AtomicBoolean(false);
         final AtomicBoolean running = new AtomicBoolean(true);
         final CountDownLatch disconnectRunning = new CountDownLatch(1);
@@ -245,9 +263,14 @@ public class TestPerChannelBookieClient extends BookKeeperClusterTestCase {
         final OrderedSafeExecutor executor = new OrderedSafeExecutor(1);
         InetSocketAddress addr = getBookie(0);
         AtomicLong bytesOutstanding = new AtomicLong(0);
+        
+        ClientConfiguration clientConf = newClientConfiguration();
+        ExtensionRegistry registry = ExtensionRegistry.newInstance();
+        ClientAuthProvider.Factory authFactory = AuthProviderFactoryFactory
+                .newClientAuthProviderFactory(clientConf, registry);
 
-        final PerChannelBookieClient client = new PerChannelBookieClient(executor, channelFactory,
-                                                                         addr, bytesOutstanding);
+        final PerChannelBookieClient client = new PerChannelBookieClient(clientConf, executor, channelFactory,
+                                                                         addr, bytesOutstanding, authFactory, registry);
         final CountDownLatch completion = new CountDownLatch(1);
         final ReadEntryCallback cb = new ReadEntryCallback() {
                 @Override

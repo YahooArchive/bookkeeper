@@ -28,6 +28,9 @@ import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback
 import org.jboss.netty.buffer.ChannelBuffer;
 
 import org.apache.bookkeeper.client.BKException;
+import org.apache.bookkeeper.conf.ClientConfiguration;
+import com.google.protobuf.ExtensionRegistry;
+import org.apache.bookkeeper.auth.AuthProviderFactoryFactory;
 
 import org.apache.bookkeeper.test.BaseTestCase;
 import org.apache.bookkeeper.test.BookieClientTest;
@@ -59,8 +62,13 @@ public class TestProtoVersions {
     }
 
     private void testVersion(int version, int expectedresult) throws Exception {
-        PerChannelBookieClient bc = new PerChannelBookieClient(base.executor, base.channelFactory, 
-                new InetSocketAddress(InetAddress.getLocalHost(), base.port), new AtomicLong(0));
+        ClientConfiguration conf = new ClientConfiguration();
+        ExtensionRegistry r = ExtensionRegistry.newInstance();
+        PerChannelBookieClient bc = new PerChannelBookieClient(conf,
+                base.executor, base.channelFactory,
+                new InetSocketAddress(InetAddress.getLocalHost(), base.port),
+                new AtomicLong(0),
+                AuthProviderFactoryFactory.newClientAuthProviderFactory(conf, r), r);
         final AtomicInteger outerrc = new AtomicInteger(-1);
         final CountDownLatch connectLatch = new CountDownLatch(1);
         bc.connectIfNeededAndDoOp(new GenericCallback<Void>() {

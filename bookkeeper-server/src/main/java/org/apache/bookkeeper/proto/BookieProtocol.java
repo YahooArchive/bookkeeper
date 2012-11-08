@@ -130,6 +130,13 @@ public interface BookieProtocol {
     public static final byte READENTRY = 2;
 
     /**
+     * Auth message. This code is for passing auth messages between the auth
+     * providers on the client and bookie. The message payload is determined
+     * by the auth providers themselves.
+     */
+    public static final byte AUTH = 3;
+
+    /**
      * The error code that indicates success
      */
     public static final int EOK = 0;

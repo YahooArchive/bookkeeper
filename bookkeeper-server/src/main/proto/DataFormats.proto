@@ -82,3 +82,12 @@ message LockDataFormat {
 message AuditorVoteFormat {
     optional string bookieId = 1;
 }
+
+/**
+ * Extendible message which auth mechanisms
+ * can use to carry their payload. 
+ */
+message AuthMessage {
+    required string authPluginName = 1;
+    extensions 1000 to max;
+}

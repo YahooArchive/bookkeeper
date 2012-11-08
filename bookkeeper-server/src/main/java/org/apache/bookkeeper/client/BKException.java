@@ -92,6 +92,8 @@ public abstract class BKException extends Exception {
             return new BKReplicationException();
         case Code.IllegalOpException:
             return new BKIllegalOpException();
+        case Code.AuthTimeoutException:
+            return new BKAuthTimeoutException();
         default:
             return new BKUnexpectedConditionException();
         }
@@ -121,6 +123,7 @@ public abstract class BKException extends Exception {
         int ProtocolVersionException = -16;
         int MetadataVersionException = -17;
         int MetaStoreException = -18;
+        int AuthTimeoutException = -19;
 
         int IllegalOpException = -100;
         int LedgerFencedException = -101;
@@ -195,6 +198,8 @@ public abstract class BKException extends Exception {
             return "Errors in replication pipeline";
         case Code.IllegalOpException:
             return "Invalid operation";
+        case Code.AuthTimeoutException:
+            return "Timed out while authenticating";
         default:
             return "Unexpected condition";
         }
@@ -347,6 +352,12 @@ public abstract class BKException extends Exception {
     public static class BKReplicationException extends BKException {
         public BKReplicationException() {
             super(Code.ReplicationException);
+        }
+    }
+        
+    public static class BKAuthTimeoutException extends BKException {
+        public BKAuthTimeoutException() {
+            super(Code.AuthTimeoutException);
         }
     }
 }
