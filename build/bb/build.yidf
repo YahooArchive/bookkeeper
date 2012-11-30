@@ -1,0 +1,19 @@
+add yinst pkg yinst_create          3.208.4472.1    *
+add yinst pkg buildyblocks          1.65            1.99999.99999
+add yinst pkg buildyblocks_igor     1.23.3.925	1.9999.9999.9999
+add yinst pkg ports/mtree	    3.7.20050808-3_02
+add yinst pkg coverity              4.5.0.4         *
+add yinst pkg coverity_license_none
+add yinst pkg dist_tools            STABLE
+add yinst pkg srczip
+add yinst pkg svnlite		    1.6		1.6.9999.9999
+add yinst pkg git
+add yinst pkg yjava_jdk             1.7             1.7.99999.99999
+add yinst pkg yjava_maven           3.0	3.9999.9999
+add yinst pkg statecc		    1.0.0	    1.9999.9999
+add yinst pkg csretools             0.0.5           0.9999.9999
+add yinst pkg yinst_auto_version    4.0.15          4.99999.99999
+add yinst pkg gen_long_desc         1.0.2           1.99999.99999
+add yinst pkg svn2cl		    0.11.4	0.9999.9999
+add yinst setting yjava_maven.localRepository=/home/y/tmp/m2-repository
+add yinst setting yjava_maven.MAVEN_OPTS=-Xmx1g -XX:MaxPermSize=128m
