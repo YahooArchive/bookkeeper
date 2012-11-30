@@ -23,7 +23,7 @@
     <groupId>org.apache.bookkeeper</groupId>
     <version>4.3.1</version>
   </parent>
-  <groupId>org.apache.bookkeeper</groupId>
+  <groupId>yahoo.yinst.cloud_messaging_bookkeeper</groupId>
   <artifactId>bookkeeper-server</artifactId>
   <name>bookkeeper-server</name>
   <url>http://maven.apache.org</url>
@@ -33,7 +33,7 @@
   </properties>
   <dependencies>
     <dependency>
-      <groupId>org.apache.bookkeeper.stats</groupId>
+      <groupId>yahoo.yinst.cloud_messaging_bookkeeper</groupId>
       <artifactId>bookkeeper-stats-api</artifactId>
       <version>${project.parent.version}</version>
     </dependency>
@@ -42,6 +42,11 @@
       <artifactId>protobuf-java</artifactId>
       <version>${protobuf.version}</version>
       <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.fusesource.leveldbjni</groupId>
+      <artifactId>leveldbjni-all</artifactId>
+      <version>1.8</version>
     </dependency>
     <dependency>
       <groupId>com.google.guava</groupId>
@@ -172,6 +177,11 @@
           <artifactId>bookkeeper-server</artifactId>
         </exclusion>
       </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>io.netty</groupId>
+      <artifactId>netty-all</artifactId>
+      <version>4.0.25.Final</version>
     </dependency>
   </dependencies>
   <build>
@@ -324,6 +334,18 @@
                     <exec executable="protoc" failonerror="true">
                       <arg value="--java_out=src/main/java" />
                       <arg value="src/main/proto/DataFormats.proto" />
+                    </exec>
+                    <exec executable="protoc" failonerror="true">
+                      <arg value="--java_out=src/main/java" />
+                      <arg value="src/main/proto/BookkeeperProtocol.proto" />
+                    </exec>
+                    <exec executable="protoc" failonerror="true">
+                      <arg value="--java_out=src/test/java" />
+                      <arg value="src/test/proto/TestDataFormats.proto" />
+                    </exec>
+                    <exec executable="protoc" failonerror="true">
+                      <arg value="--java_out=src/main/java" />
+                      <arg value="src/main/proto/DbLedgerStorageDataFormats.proto" />
                     </exec>
                   </target>
                 </configuration>
