@@ -20,6 +20,7 @@ package org.apache.bookkeeper.proto;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.ArrayDeque;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -62,6 +63,8 @@ import org.jboss.netty.util.HashedWheelTimer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.LinkedListMultimap;
+import com.google.common.collect.ListMultimap;
 import com.google.protobuf.ExtensionRegistry;
 
 /**
@@ -84,7 +87,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
     OrderedSafeExecutor executor;
 
     ConcurrentHashMap<CompletionKey, AddCompletion> addCompletions = new ConcurrentHashMap<CompletionKey, AddCompletion>();
-    ConcurrentHashMap<CompletionKey, ReadCompletion> readCompletions = new ConcurrentHashMap<CompletionKey, ReadCompletion>();
+    ListMultimap<CompletionKey, ReadCompletion> readCompletions = LinkedListMultimap.create();
 
     /**
      * The following member variables do not need to be concurrent, or volatile
@@ -387,7 +390,9 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
                                         final long entryId,
                                         ReadEntryCallback cb, Object ctx) {
         final CompletionKey key = new CompletionKey(ledgerId, entryId);
-        readCompletions.put(key, new ReadCompletion(cb, ctx));
+        synchronized (readCompletions) {
+            readCompletions.put(key, new ReadCompletion(cb, ctx));
+        }
 
         int totalHeaderSize = 4 // for the length of the packet
                               + 4 // for request type
@@ -423,7 +428,9 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
 
     public void readEntry(final long ledgerId, final long entryId, ReadEntryCallback cb, Object ctx) {
         final CompletionKey key = new CompletionKey(ledgerId, entryId);
-        readCompletions.put(key, new ReadCompletion(cb, ctx));
+        synchronized (readCompletions) {
+            readCompletions.put(key, new ReadCompletion(cb, ctx));
+        }
 
         int totalHeaderSize = 4 // for the length of the packet
                               + 4 // for request type
@@ -502,21 +509,25 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         executor.submitOrdered(key.ledgerId, new SafeRunnable() {
             @Override
             public void safeRun() {
+                synchronized (readCompletions) {
+                    for (ReadCompletion readCompletion : readCompletions.get(key)) {
+                        LOG.error("Could not write  request for reading entry: " + key.entryId + " ledger-id: "
+                                + key.ledgerId + " bookie: " + channel.getRemoteAddress());
 
-                ReadCompletion readCompletion = readCompletions.remove(key);
-                String bAddress = "null";
-                Channel c = channel;
-                if(c != null) {
-                    bAddress = c.getRemoteAddress().toString();
-                }
+                        String bAddress = "null";
+                        Channel c = channel;
+                        if (c != null) {
+                            bAddress = c.getRemoteAddress().toString();
+                        }
 
-                if (readCompletion != null) {
-                    LOG.debug("Could not write request for reading entry: {}"
-                              + " ledger-id: {} bookie: {}",
-                              new Object[] { key.entryId, key.ledgerId, bAddress });
+                        if (readCompletion != null) {
+                            LOG.debug("Could not write request for reading entry: {}" + " ledger-id: {} bookie: {}",
+                                    new Object[] { key.entryId, key.ledgerId, bAddress });
 
-                    readCompletion.cb.readEntryComplete(BKException.Code.BookieHandleNotAvailableException,
-                                                        key.ledgerId, key.entryId, null, readCompletion.ctx);
+                            readCompletion.cb.readEntryComplete(BKException.Code.BookieHandleNotAvailableException,
+                                    key.ledgerId, key.entryId, null, readCompletion.ctx);
+                        }
+                    }
                 }
             }
 
@@ -806,16 +817,24 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         }
 
         CompletionKey key = new CompletionKey(ledgerId, entryId);
-        ReadCompletion readCompletion = readCompletions.remove(key);
+        ReadCompletion readCompletion = null;
+        synchronized (readCompletions) {
+            List<ReadCompletion> completions = readCompletions.get(key);
+            if (completions.size() > 0) {
+                readCompletion = completions.remove(0);
+            }
 
-        if (readCompletion == null) {
-            /*
-             * This is a special case. When recovering a ledger, a client
-             * submits a read request with id -1, and receives a response with a
-             * different entry id.
-             */
-            
-            readCompletion = readCompletions.remove(new CompletionKey(ledgerId, BookieProtocol.LAST_ADD_CONFIRMED));
+            if (readCompletion == null) {
+                /*
+                 * This is a special case. When recovering a ledger, a client submits a read request with id -1, and
+                 * receives a response with a different entry id.
+                 */
+
+                completions = readCompletions.get(new CompletionKey(ledgerId, BookieProtocol.LAST_ADD_CONFIRMED));
+                if (completions.size() > 0) {
+                    readCompletion = completions.remove(0);
+                }
+            }
         }
 
         if (readCompletion == null) {

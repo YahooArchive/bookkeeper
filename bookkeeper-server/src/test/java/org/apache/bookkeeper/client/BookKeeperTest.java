@@ -21,20 +21,21 @@ package org.apache.bookkeeper.client;
 *
 */
 
+import java.util.Enumeration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.bookkeeper.conf.ClientConfiguration;
 import org.apache.bookkeeper.client.AsyncCallback.AddCallback;
+import org.apache.bookkeeper.client.AsyncCallback.ReadCallback;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
+import org.apache.bookkeeper.conf.ClientConfiguration;
 import org.apache.bookkeeper.test.BaseTestCase;
-import org.apache.zookeeper.ZooKeeper;
-import org.apache.zookeeper.Watcher;
-import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.KeeperException;
-
+import org.apache.zookeeper.WatchedEvent;
+import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.ZooKeeper;
 import org.junit.Assert;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -237,5 +238,34 @@ public class BookKeeperTest extends BaseTestCase {
         Assert.assertTrue("Ledger should be flagged as closed!",result);
 
         bkc.close();
+    }
+
+    /**
+     * Tests that issuing multiple reads for the same entry at the same time works as expected.
+     * 
+     * @throws Exception
+     */
+    @Test(timeout = 20000)
+    public void testDoubleRead() throws Exception {
+        LedgerHandle lh = bkc.createLedger(digestType, "".getBytes());
+
+        lh.addEntry("test".getBytes());
+
+        // Read the same entry more times asynchronously
+        final int N = 10;
+        final CountDownLatch latch = new CountDownLatch(N);
+        for (int i = 0; i < N; i++) {
+            lh.asyncReadEntries(0, 0, new ReadCallback() {
+                public void readComplete(int rc, LedgerHandle lh, Enumeration<LedgerEntry> seq, Object ctx) {
+                    if (rc == BKException.Code.OK) {
+                        latch.countDown();
+                    } else {
+                        fail("Read fail");
+                    }
+                }
+            }, null);
+        }
+
+        latch.await();
     }
 }
