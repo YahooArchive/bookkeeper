@@ -243,10 +243,12 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
                 } catch (InterruptedException ie) {
                     // do nothing
                 }
-                if (!isBookieRunning()
-                    || !isNioServerRunning()) {
+                if (!isBookieRunning() || !isNioServerRunning()) {
                     shutdown();
-                    break;
+                }
+                if (isAutoRecoveryDaemonEnabled && !isAutoRecoveryRunning()) {
+                    LOG.error("Autorecovery daemon has stopped. Please check the logs");
+                    isAutoRecoveryDaemonEnabled = false; // to avoid spamming the logs
                 }
                 if (isAutoRecoveryDaemonEnabled && !isAutoRecoveryRunning()) {
                     LOG.error("Autorecovery daemon has stopped. Please check the logs");
