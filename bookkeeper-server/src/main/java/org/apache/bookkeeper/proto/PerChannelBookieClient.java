@@ -20,14 +20,10 @@ package org.apache.bookkeeper.proto;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.ArrayDeque;
-import java.util.Set;
-import java.util.Collections;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.google.common.collect.ImmutableSet;
 import org.apache.bookkeeper.auth.ClientAuthProvider;
 import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.conf.ClientConfiguration;
@@ -63,12 +59,9 @@ import org.jboss.netty.handler.codec.frame.TooLongFrameException;
 import org.jboss.netty.handler.timeout.ReadTimeoutException;
 import org.jboss.netty.handler.timeout.ReadTimeoutHandler;
 import org.jboss.netty.util.HashedWheelTimer;
-import org.jboss.netty.util.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.collect.LinkedListMultimap;
-import com.google.common.collect.ListMultimap;
 import com.google.protobuf.ExtensionRegistry;
 
 /**
@@ -83,7 +76,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
     static final Logger LOG = LoggerFactory.getLogger(PerChannelBookieClient.class);
 
     static final long maxMemory = Runtime.getRuntime().maxMemory() / 5;
-    public static final int MAX_FRAME_LENGTH = 2 * 1024 * 1024; // 2M
+    public static final int MAX_FRAME_LENGTH = 110 * 1024 * 1024; // increased max netty frame size to 110M
 
     InetSocketAddress addr;
     AtomicLong totalBytesOutstanding;
@@ -379,6 +372,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
                         }
                         // totalBytesOutstanding.addAndGet(entrySize);
                     } else {
+                        LOG.error("Error writing entry: " + completionKey);
                         errorOutAddKey(completionKey);
                     }
                 }

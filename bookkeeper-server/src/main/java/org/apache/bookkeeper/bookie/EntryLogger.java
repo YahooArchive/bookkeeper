@@ -404,8 +404,8 @@ public class EntryLogger {
         sizeBuff.flip();
         int entrySize = sizeBuff.getInt();
         // entrySize does not include the ledgerId
-        if (entrySize > MB) {
-            LOG.error("Sanity check failed for entry size of " + entrySize + " at location " + pos + " in " + entryLogId);
+        if (entrySize > 110 * MB) {
+            LOG.warn("Sanity check failed for entry size of " + entrySize + " at location " + pos + " in " + entryLogId);
 
         }
         if (entrySize < MIN_SANE_ENTRY_SIZE) {
