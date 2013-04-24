@@ -79,7 +79,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
     static final Logger LOG = LoggerFactory.getLogger(PerChannelBookieClient.class);
 
     static final long maxMemory = Runtime.getRuntime().maxMemory() / 5;
-    public static final int MAX_FRAME_LENGTH = 2 * 1024 * 1024; // 2M
+    public static final int MAX_FRAME_LENGTH = 110 * 1024 * 1024; // increased max netty frame size to 110M
 
     InetSocketAddress addr;
     AtomicLong totalBytesOutstanding;
@@ -375,6 +375,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
                         }
                         // totalBytesOutstanding.addAndGet(entrySize);
                     } else {
+                        LOG.error("Error writing entry: " + completionKey);
                         errorOutAddKey(completionKey);
                     }
                 }
@@ -635,8 +636,8 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
     public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) throws Exception {
         Throwable t = e.getCause();
         if (t instanceof CorruptedFrameException || t instanceof TooLongFrameException) {
-            LOG.error("Corrupted fram received from bookie: "
-                      + e.getChannel().getRemoteAddress());
+            LOG.error("Corrupted frame received from bookie: "
+                      + e.getChannel().getRemoteAddress(), t);
             return;
         }
         if (t instanceof ReadTimeoutException) {

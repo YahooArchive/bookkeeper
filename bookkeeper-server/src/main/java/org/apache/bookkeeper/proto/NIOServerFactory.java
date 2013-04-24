@@ -187,6 +187,7 @@ public class NIOServerFactory extends Thread {
      *
      */
     synchronized public void clear() {
+        LOG.debug("NIOServerFactory.clear()");
         selector.wakeup();
         synchronized (cnxns) {
             // got to clear all the connections that we have in the selector
@@ -227,8 +228,6 @@ public class NIOServerFactory extends Thread {
 
         private SelectionKey sk;
 
-        boolean initialized;
-
         ByteBuffer lenBuffer = ByteBuffer.allocate(4);
 
         ByteBuffer incomingBuffer = lenBuffer;
@@ -241,6 +240,7 @@ public class NIOServerFactory extends Thread {
         final BookieAuthProvider authProvider;
 
         void doIO(SelectionKey k) throws InterruptedException {
+            assert k == sk;
             try {
                 if (sock == null) {
                     return;
@@ -341,7 +341,7 @@ public class NIOServerFactory extends Thread {
                     }
                     synchronized (this) {
                         if (outgoingBuffers.size() == 0) {
-                            if (!initialized && (sk.interestOps() & SelectionKey.OP_READ) == 0) {
+                            if ((sk.interestOps() & SelectionKey.OP_READ) == 0) {
                                 throw new IOException("Responded to info probe");
                             }
                             sk.interestOps(sk.interestOps() & (~SelectionKey.OP_WRITE));
@@ -351,9 +351,10 @@ public class NIOServerFactory extends Thread {
                     }
                 }
             } catch (CancelledKeyException e) {
+                LOG.warn("Cancelled key", e);
                 close();
             } catch (IOException e) {
-                // LOG.error("FIXMSG",e);
+                LOG.error("IOException",e);
                 close();
             }
         }
@@ -379,7 +380,9 @@ public class NIOServerFactory extends Thread {
         private void readLength(SelectionKey k) throws IOException {
             // Read the length, now get the buffer
             int len = lenBuffer.getInt();
-            if (len < 0 || len > 0xfffff) {
+            
+            // Setting the max entry size to 110Mb
+            if (len < 0 || len > (110 * 1024 * 1024)) {
                 throw new IOException("Len error " + len);
             }
             incomingBuffer = ByteBuffer.allocate(len);
