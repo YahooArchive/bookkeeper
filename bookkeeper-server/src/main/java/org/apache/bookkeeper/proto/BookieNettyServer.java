@@ -60,7 +60,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 class BookieNettyServer {
     private final static Logger LOG = LoggerFactory.getLogger(BookieNettyServer.class);
 
-    final static int maxMessageSize = 0xfffff;
+    final static int maxMessageSize = PerChannelBookieClient.MAX_FRAME_LENGTH;
     final ServerConfiguration conf;
     final ChannelFactory serverChannelFactory;
     final RequestProcessor requestProcessor;
