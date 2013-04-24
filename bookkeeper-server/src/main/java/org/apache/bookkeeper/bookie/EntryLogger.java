@@ -49,12 +49,12 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.bookkeeper.bookie.LedgerDirsManager.LedgerDirsListener;
 import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.proto.PerChannelBookieClient;
 import org.apache.bookkeeper.util.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -109,6 +109,7 @@ public class EntryLogger {
     final static long INVALID_LID = -1L;
 
     final static int MIN_SANE_ENTRY_SIZE = 8 + 8;
+    final static int MAX_SANE_ENTRY_SIZE = PerChannelBookieClient.MAX_FRAME_LENGTH;
     final static long MB = 1024 * 1024;
 
     final ServerConfiguration conf;
@@ -672,8 +673,8 @@ public class EntryLogger {
         sizeBuff.flip();
         int entrySize = sizeBuff.getInt();
         // entrySize does not include the ledgerId
-        if (entrySize > MB) {
-            LOG.error("Sanity check failed for entry size of " + entrySize + " at location " + pos + " in " + entryLogId);
+        if (entrySize > MAX_SANE_ENTRY_SIZE) {
+            LOG.warn("Sanity check failed for entry size of " + entrySize + " at location " + pos + " in " + entryLogId);
 
         }
         if (entrySize < MIN_SANE_ENTRY_SIZE) {

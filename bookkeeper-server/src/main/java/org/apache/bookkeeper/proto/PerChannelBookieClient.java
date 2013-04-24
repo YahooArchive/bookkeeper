@@ -87,7 +87,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
 
     static final Logger LOG = LoggerFactory.getLogger(PerChannelBookieClient.class);
 
-    public static final int MAX_FRAME_LENGTH = 2 * 1024 * 1024; // 2M
+    public static final int MAX_FRAME_LENGTH = 5 * 1024 * 1024; // increased max netty frame size to 5Mb
     public static final AtomicLong txnIdGenerator = new AtomicLong(0);
 
     final BookieSocketAddress addr;
