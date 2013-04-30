@@ -25,6 +25,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -139,7 +140,9 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
      */
     protected void startBKCluster() throws Exception {
         baseClientConf.setZkServers(zkUtil.getZooKeeperConnectString());
-        bkc = new BookKeeperTestClient(baseClientConf);
+        if (numBookies > 0) {
+            bkc = new BookKeeperTestClient(baseClientConf);
+        }
 
         // Create Bookie Servers (B1, B2, B3)
         for (int i = 0; i < numBookies; i++) {
@@ -365,13 +368,14 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
         bs.clear();
         Thread.sleep(1000);
         // restart them to ensure we can't
-        int j = 0;
-        for (ServerConfiguration conf : bsConfs) {
+
+        List<ServerConfiguration> bsConfsCopy = new ArrayList<ServerConfiguration>(bsConfs);
+        bsConfs.clear();
+        for (ServerConfiguration conf : bsConfsCopy) {
             if (null != newConf) {
                 conf.loadConf(newConf);
             }
-            bs.add(startBookie(conf));
-            j++;
+            startBookie(conf);
         }
     }
 
@@ -387,8 +391,7 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
     public int startNewBookie()
             throws Exception {
         ServerConfiguration conf = newServerConfiguration();
-        bsConfs.add(conf);
-        bs.add(startBookie(conf));
+        startBookie(conf);
 
         return conf.getBookiePort();
     }
@@ -408,6 +411,10 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
         bs.add(server);
 
         server.start();
+
+        if (bkc == null) {
+            bkc = new BookKeeperTestClient(baseClientConf);
+        }
 
         int port = conf.getBookiePort();
         while(bkc.getZkHandle().exists("/ledgers/available/" + InetAddress.getLocalHost().getHostAddress() + ":" + port, false) == null) {
