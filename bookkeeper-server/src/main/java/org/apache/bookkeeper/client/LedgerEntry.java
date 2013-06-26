@@ -35,7 +35,7 @@ import org.jboss.netty.buffer.ChannelBufferInputStream;
  */
 
 public class LedgerEntry {
-    Logger LOG = LoggerFactory.getLogger(LedgerEntry.class);
+    private static Logger LOG = LoggerFactory.getLogger(LedgerEntry.class);
 
     long ledgerId;
     long entryId;
