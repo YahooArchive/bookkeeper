@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.bookkeeper.util.SnapshotMap;
+import org.apache.bookkeeper.bookie.Bookie.NoLedgerException;
 import org.apache.bookkeeper.bookie.LedgerDirsManager.LedgerDirsListener;
 import org.apache.bookkeeper.bookie.LedgerDirsManager.NoWritableLedgerDirException;
 import org.apache.bookkeeper.conf.ServerConfiguration;
@@ -427,6 +428,9 @@ public class LedgerCacheImpl implements LedgerCache {
                 try {
                     fi = getFileInfo(l, null);
                     fi.flushHeader();
+                } catch (NoLedgerException e) {
+                    LOG.info("Ledger not found when flushing {}", l);
+                    return;
                 } finally {
                     if (null != fi) {
                         fi.release();
