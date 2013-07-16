@@ -236,7 +236,14 @@ public class ZkUtils {
                 throw nne;
             }
             String parent = path.substring(0, lastSlash);
-            createFullPathOptimistic(zkc, parent, new byte[0], acl, createMode);
+            try {
+                createFullPathOptimistic(zkc, parent, new byte[0], acl, createMode);
+            } catch (KeeperException.NodeExistsException e) {
+                // If multiple threads are calling createFullPathOptimistic() there will be race conditions on creating
+                // the intermediate nodes. If the intermediate nodes have been created since we last check, we can just
+                // ignore the exception and continue creating the child nodes
+            }
+
             zkc.create(path, data, acl, createMode);
         }
     }
