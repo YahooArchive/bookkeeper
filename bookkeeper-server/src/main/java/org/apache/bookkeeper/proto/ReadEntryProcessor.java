@@ -102,6 +102,11 @@ class ReadEntryProcessor extends PacketProcessorBase {
                 LOG.error("Error reading " + read, e);
             }
             errorCode = BookieProtocol.ENOLEDGER;
+        } catch (Bookie.EntryTrimmedException e) {
+            if (LOG.isTraceEnabled()) {
+                LOG.error("Error reading " + read.getEntryId() + "@" + read.getLedgerId(), e);
+            }
+            errorCode = BookieProtocol.ETRIMMED;
         } catch (Bookie.NoEntryException e) {
             if (LOG.isTraceEnabled()) {
                 LOG.error("Error reading " + read, e);

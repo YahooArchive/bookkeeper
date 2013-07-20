@@ -276,6 +276,10 @@ public class TestSyncThread {
         }
 
         @Override
+        public void trimEntries(long ledgerId, long lastEntryId) throws IOException {
+        }
+
+        @Override
         public void start() {
         }
 

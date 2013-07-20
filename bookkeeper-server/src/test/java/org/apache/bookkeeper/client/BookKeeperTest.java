@@ -25,9 +25,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Enumeration;
 
 import org.apache.bookkeeper.conf.ClientConfiguration;
 import org.apache.bookkeeper.client.AsyncCallback.AddCallback;
+import org.apache.bookkeeper.client.AsyncCallback.ReadCallback;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
 import org.apache.bookkeeper.test.BaseTestCase;
 import org.apache.zookeeper.ZooKeeper;
@@ -238,6 +240,45 @@ public class BookKeeperTest extends BaseTestCase {
         result = bkc.isClosed(lId);
         Assert.assertTrue("Ledger should be flagged as closed!",result);
 
+        bkc.close();
+    }
+
+    /**
+     * Tests that issuing multiple reads for the same entry at the same time works as expected.
+     * 
+     * @throws Exception
+     */
+    @Test(timeout = 20000)
+    public void testDoubleRead() throws Exception {
+        LedgerHandle lh = bkc.createLedger(digestType, "".getBytes());
+
+        lh.addEntry("test".getBytes());
+
+        // Read the same entry more times asynchronously
+        final int N = 10;
+        final CountDownLatch latch = new CountDownLatch(N);
+        for (int i = 0; i < N; i++) {
+            lh.asyncReadEntries(0, 0, new ReadCallback() {
+                public void readComplete(int rc, LedgerHandle lh,
+                                         Enumeration<LedgerEntry> seq, Object ctx) {
+                    if (rc == BKException.Code.OK) {
+                        latch.countDown();
+                    } else {
+                        fail("Read fail");
+                    }
+                }
+            }, null);
+        }
+
+        latch.await();
+    }
+
+    @Test(timeout=60000)
+    public void testTrimLedger() throws Exception {
+        LedgerHandle lh = bkc.createLedger(3, 3, DigestType.CRC32, "testPasswd".getBytes());
+        long entryId = lh.addEntry("test".getBytes());
+        lh.asyncTrim(entryId);
+        lh.close();
         bkc.close();
     }
 }

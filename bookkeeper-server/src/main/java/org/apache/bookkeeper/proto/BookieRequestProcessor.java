@@ -123,6 +123,9 @@ public class BookieRequestProcessor implements RequestProcessor {
                 case READ_ENTRY:
                     processReadRequestV3(r, c);
                     break;
+                case TRIM_LEDGER:
+                    processTrimRequestV3(r);
+                    break;
                 default:
                     LOG.info("Unknown operation type {}", header.getOperation());
                     BookkeeperProtocol.Response.Builder response =
@@ -143,6 +146,9 @@ public class BookieRequestProcessor implements RequestProcessor {
                     break;
                 case BookieProtocol.READENTRY:
                     processReadRequest(r, c);
+                    break;
+                case BookieProtocol.TRIM:
+                    processTrimRequest(r);
                     break;
                 default:
                     LOG.error("Unknown op type {}, sending error", r.getOpCode());
@@ -173,6 +179,24 @@ public class BookieRequestProcessor implements RequestProcessor {
         }
     }
 
+    private void processTrimRequestV3(final BookkeeperProtocol.Request r) {
+        if (!r.getHeader().getVersion().equals(BookkeeperProtocol.ProtocolVersion.VERSION_THREE)) {
+            LOG.error("Invalid protocol version, expected "
+                      + BookkeeperProtocol.ProtocolVersion.VERSION_THREE
+                      + ". Got " + r.getHeader().getVersion());
+            return;
+
+        }
+        TrimLedgerProcessor trim = new TrimLedgerProcessor(r.getTrimRequest().getLedgerId(),
+                r.getTrimRequest().getEntryId(), bookie);
+        if (null == writeThreadPool) {
+            trim.run();
+        } else {
+            writeThreadPool.submit(trim);
+        }
+
+    }
+
     private void processAddRequest(final BookieProtocol.Request r, final Channel c) {
         WriteEntryProcessor write = new WriteEntryProcessor(r, c, this);
         if (null == writeThreadPool) {
@@ -191,4 +215,21 @@ public class BookieRequestProcessor implements RequestProcessor {
         }
     }
 
+    private void processTrimRequest(final BookieProtocol.Request r) {
+        byte protoVersion = r.getProtocolVersion();
+        if (protoVersion < BookieProtocol.LOWEST_COMPAT_PROTOCOL_VERSION
+                || protoVersion > BookieProtocol.CURRENT_PROTOCOL_VERSION) {
+            LOG.error("Invalid protocol version, expected something between "
+                      + BookieProtocol.LOWEST_COMPAT_PROTOCOL_VERSION
+                      + " & " + BookieProtocol.CURRENT_PROTOCOL_VERSION
+                      + ". got " + protoVersion);
+            return;
+        }
+        TrimLedgerProcessor trim = new TrimLedgerProcessor(r.getLedgerId(), r.getEntryId(), bookie);
+        if (null == writeThreadPool) {
+            trim.run();
+        } else {
+            writeThreadPool.submit(trim);
+        }
+    }
 }
