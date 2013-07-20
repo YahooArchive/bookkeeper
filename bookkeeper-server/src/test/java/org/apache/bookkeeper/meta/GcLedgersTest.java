@@ -374,5 +374,9 @@ public class GcLedgersTest extends LedgerManagerTestCase {
         @Override
         public void updateEntriesLocations(Iterable<EntryLocation> locations) throws IOException {
         }
+
+        @Override
+        public void trimEntries(long ledgerId, long lastEntryId) throws IOException {
+        }
     }
 }

@@ -248,7 +248,11 @@ public class LedgerFragmentReplicator {
             @Override
             public void readComplete(int rc, LedgerHandle lh,
                     Enumeration<LedgerEntry> seq, Object ctx) {
-                if (rc != Code.OK.intValue()) {
+                if (rc == BKException.Code.EntryTrimmedException) {
+                    LOG.debug("Skipping replication of alread trimmed entry: {}@{}", lh.getId(), entryId);
+                    ledgerFragmentEntryMcb.processResult(BKException.Code.OK, null, null);
+                    return;
+                } else if (rc != BKException.Code.OK) {
                     LOG.error("BK error reading ledger entry: " + entryId,
                             BKException.create(rc));
                     ledgerFragmentEntryMcb.processResult(rc, null, null);

@@ -190,8 +190,9 @@ public class BKStats {
     public static final int STATS_ADD = 0;
     public static final int STATS_READ = 1;
     public static final int STATS_UNKNOWN = 2;
+    public static final int STATS_TRIM = 3;
     // NOTE: if add other stats, increment NUM_STATS
-    public static final int NUM_STATS = 3;
+    public static final int NUM_STATS = 4;
 
     OpStats[] stats = new OpStats[NUM_STATS];
 

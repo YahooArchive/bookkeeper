@@ -398,6 +398,38 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         }
     }
 
+    /**
+     * This method should be called only after connection has been checked for
+     * {@link #connectIfNeededAndDoOp(GenericCallback)}
+     * 
+     * @param ledgerId
+     * @param masterKey
+     * @param lastEntryId
+     * @param cb
+     * @param ctx
+     * @param options
+     */
+    void trim(final long ledgerId, byte[] masterKey, final long lastEntryId, final int options) {
+        int totalHeaderSize = 4 // for the length of the packet
+                            + 4 // for request type
+                            + 8 // for ledgerId
+                            + 8; // for entryId
+
+        try {
+            ChannelBuffer tmpEntry = channel.getConfig().getBufferFactory().getBuffer(totalHeaderSize);
+            tmpEntry.writeInt(totalHeaderSize - 4);
+
+            tmpEntry.writeInt(new PacketHeader(BookieProtocol.CURRENT_PROTOCOL_VERSION, BookieProtocol.TRIM,
+                    BookieProtocol.FLAG_NONE).toInt());
+            tmpEntry.writeLong(ledgerId);
+            tmpEntry.writeLong(lastEntryId);
+
+            channel.write(tmpEntry);
+        } catch (Throwable e) {
+            LOG.warn("Trim entry operation failed", e);
+        }
+    }
+
     public void readEntryAndFenceLedger(final long ledgerId, byte[] masterKey,
                                         final long entryId,
                                         ReadEntryCallback cb, Object ctx) {
@@ -821,6 +853,8 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
             rc = BKException.Code.OK;
         } else if (rc == BookieProtocol.ENOENTRY || rc == BookieProtocol.ENOLEDGER) {
             rc = BKException.Code.NoSuchEntryException;
+        } else if (rc == BookieProtocol.ETRIMMED) {
+            rc = BKException.Code.EntryTrimmedException;
         } else if (rc == BookieProtocol.EBADVERSION) {
             rc = BKException.Code.ProtocolVersionException;
         } else if (rc == BookieProtocol.EUA) {

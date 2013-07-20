@@ -21,6 +21,10 @@ package org.apache.bookkeeper.proto;
  *
  */
 
+import java.nio.ByteBuffer;
+
+import org.jboss.netty.buffer.ChannelBuffer;
+
 /**
  * The packets of the Bookie protocol all have a 4-byte integer indicating the
  * type of request or response at the very beginning of the packet followed by a
@@ -137,6 +141,15 @@ public interface BookieProtocol {
     public static final byte AUTH = 3;
 
     /**
+     * The Trim request payload will be the ledger number and entry number
+     * to read. (The ledger number is an 8-byte integer and the entry number is
+     * a 8-byte integer.)  The response payload will be a 4-byte integer that has the
+     * error code followed by the 8-byte ledger number and 8-byte entry number
+     * of the last entry trimmed.
+     */
+    public static final byte TRIM = 4;
+
+    /**
      * The error code that indicates success
      */
     public static final int EOK = 0;
@@ -148,6 +161,10 @@ public interface BookieProtocol {
      * The error code that indicates that the requested entry does not exist
      */
     public static final int ENOENTRY = 2;
+    /**
+     * The error code that indicates that the requested entry was already trimmed
+     */
+    public static final int ETRIMMED = 3;
     /**
      * The error code that indicates an invalid request type
      */
