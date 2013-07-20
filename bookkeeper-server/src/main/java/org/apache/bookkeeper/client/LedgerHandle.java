@@ -22,34 +22,29 @@ package org.apache.bookkeeper.client;
 
 import java.net.InetSocketAddress;
 import java.security.GeneralSecurityException;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.Arrays;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.bookkeeper.client.AsyncCallback.ReadLastConfirmedCallback;
-import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.AsyncCallback.AddCallback;
 import org.apache.bookkeeper.client.AsyncCallback.CloseCallback;
 import org.apache.bookkeeper.client.AsyncCallback.ReadCallback;
-import org.apache.bookkeeper.client.BKException.BKNotEnoughBookiesException;
+import org.apache.bookkeeper.client.AsyncCallback.ReadLastConfirmedCallback;
+import org.apache.bookkeeper.client.AsyncCallback.TrimCallback;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
-import org.apache.bookkeeper.client.LedgerMetadata;
-import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
-import org.apache.bookkeeper.util.OrderedSafeExecutor.OrderedSafeGenericCallback;
-
 import org.apache.bookkeeper.proto.BookieProtocol;
+import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.proto.DataFormats.LedgerMetadataFormat.State;
+import org.apache.bookkeeper.util.OrderedSafeExecutor.OrderedSafeGenericCallback;
 import org.apache.bookkeeper.util.SafeRunnable;
-
-import com.google.common.util.concurrent.RateLimiter;
-
+import org.jboss.netty.buffer.ChannelBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.jboss.netty.buffer.ChannelBuffer;
+import com.google.common.util.concurrent.RateLimiter;
 
 /**
  * Ledger handle contains ledger metadata and is used to access the read and
@@ -524,6 +519,46 @@ public class LedgerHandle {
     }
 
     /**
+     * Trim ledger entries up to entryId.
+     * <p>
+     * Tells the bookies in the quorum that we are no more interested in all the entries up to lastEntryId.
+     * <p>
+     * The trim operation is an "hint" to bookies so that they can skip storing and indexing the entries in which we
+     * have no more interest.
+     * <p>
+     * The behavior of calling readEntries() on entries that were already trimmed is undefined. The call with either
+     * succeed or fail saying the entry was not found.
+     * <p>
+     * This method is not blocking. The trimming is done asynchronously and no error is reported.
+     * 
+     * @param lastEntryId
+     *            id last entry to be trimmed
+     * @return the entryId of the new inserted entry
+     */
+    public void asyncTrim(final long lastEntryId) {
+        if (metadata.isClosed()) {
+            LOG.warn("Attempt to trim a closed ledger: " + ledgerId);
+            return;
+        }
+
+        if (lastEntryId > lastAddConfirmed) {
+            // The entries were already trimmed
+            return;
+        }
+
+        try {
+            bk.mainWorkerPool.submitOrdered(ledgerId, new SafeRunnable() {
+                @Override
+                public void safeRun() {
+                    new TrimOp(LedgerHandle.this, lastEntryId).initiate();
+                }
+            });
+        } catch (RuntimeException e) {
+            LOG.warn("Error sending trim operation for ledger {}", ledgerId, e);
+        }
+    }
+
+    /**
      * Obtains asynchronously the last confirmed write from a quorum of bookies. This 
      * call obtains the the last add confirmed each bookie has received for this ledger
      * and returns the maximum. If the ledger has been closed, the value returned by this
@@ -988,6 +1023,27 @@ public class LedgerHandle {
             SyncCounter counter = (SyncCounter) ctx;
 
             this.entryId = entry;
+            counter.setrc(rc);
+            counter.dec();
+        }
+    }
+
+    private static class SyncTrimCallback implements TrimCallback {
+        /**
+         * Implementation of callback interface for synchronous read method.
+         *
+         * @param rc
+         *          return code
+         * @param leder
+         *          ledger identifier
+         * @param lastEntryId
+         *          last entry id
+         * @param ctx
+         *          control object
+         */
+        @Override
+        public void trimComplete(int rc, LedgerHandle lh, long lastEntryId, Object ctx) {
+            SyncCounter counter = (SyncCounter) ctx;
             counter.setrc(rc);
             counter.dec();
         }
