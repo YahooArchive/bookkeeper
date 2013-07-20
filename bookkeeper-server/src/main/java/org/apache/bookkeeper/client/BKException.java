@@ -21,7 +21,6 @@ package org.apache.bookkeeper.client;
  *
  */
 
-import java.lang.Exception;
 
 /**
  * Class the enumerates all the possible error conditions
@@ -64,6 +63,8 @@ public abstract class BKException extends Exception {
             return new ZKException();
         case Code.MetaStoreException:
             return new MetaStoreException();
+        case Code.EntryTrimmedException:
+            return new BKEntryTrimmedException();
         case Code.LedgerRecoveryException:
             return new BKLedgerRecoveryException();
         case Code.LedgerClosedException:
@@ -124,6 +125,7 @@ public abstract class BKException extends Exception {
         int MetadataVersionException = -17;
         int MetaStoreException = -18;
         int ClientClosedException = -19;
+        int EntryTrimmedException = -20;
 
         int IllegalOpException = -100;
         int LedgerFencedException = -101;
@@ -170,6 +172,8 @@ public abstract class BKException extends Exception {
             return "Error while using ZooKeeper";
         case Code.MetaStoreException:
             return "Error while using MetaStore";
+        case Code.EntryTrimmedException:
+            return "Entry was already trimmed";
         case Code.LedgerRecoveryException:
             return "Error while recovering ledger";
         case Code.LedgerClosedException:
@@ -262,6 +266,12 @@ public abstract class BKException extends Exception {
     public static class BKWriteException extends BKException {
         public BKWriteException() {
             super(Code.WriteException);
+        }
+    }
+
+    public static class BKEntryTrimmedException extends BKException {
+        public BKEntryTrimmedException() {
+            super(Code.EntryTrimmedException);
         }
     }
 
