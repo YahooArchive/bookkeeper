@@ -40,6 +40,7 @@ import org.apache.bookkeeper.proto.BookkeeperProtocol.OperationType;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.ProtocolVersion;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.ReadRequest;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.ReadResponse;
+import org.apache.bookkeeper.proto.BookkeeperProtocol.TrimRequest;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.Request;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.Response;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.StatusCode;
@@ -365,6 +366,57 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         } catch (Throwable e) {
             LOG.warn("Add entry operation failed", e);
             errorOutAddKey(completionKey);
+        }
+    }
+
+    /**
+     * This method should be called only after connection has been checked for
+     * {@link #connectIfNeededAndDoOp(GenericCallback)}
+     *
+     * @param ledgerId
+     * @param masterKey
+     * @param lastEntryId
+     * @param cb
+     * @param ctx
+     * @param options
+     */
+    void trim(final long ledgerId, byte[] masterKey, final long lastEntryId, final int options) {
+        final long txnId = getTxnId();
+        BKPacketHeader.Builder headerBuilder = BKPacketHeader.newBuilder()
+                .setVersion(ProtocolVersion.VERSION_THREE)
+                .setOperation(OperationType.TRIM_LEDGER)
+                .setTxnId(txnId);
+        TrimRequest.Builder trimBuilder = TrimRequest.newBuilder()
+                .setLedgerId(ledgerId).setEntryId(lastEntryId);
+
+        final Request request = Request.newBuilder()
+            .setHeader(headerBuilder.build())
+            .setTrimRequest(trimBuilder.build())
+            .build();
+
+        final Channel c = channel;
+        if (c == null) {
+            LOG.warn("No channel exists for sending trim message {}@{} {}",
+                     new Object[] { lastEntryId, ledgerId, addr });
+            return;
+        }
+
+        try {
+            ChannelFuture future = c.write(request);
+            future.addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(ChannelFuture future) throws Exception {
+                        if (!future.isSuccess()) {
+                            if (!(future.getCause() instanceof ClosedChannelException)) {
+                                LOG.warn("Writing trim(lid={}, eid={}) to channel {} failed : ",
+                                        new Object[] { ledgerId, lastEntryId, c, future.getCause() });
+                            }
+                        }
+                    }
+                });
+        } catch(Throwable e) {
+            LOG.warn("Trim operation (lid={}, eid={}) to channel {} failed",
+                     new Object[] { ledgerId, lastEntryId, c, e });
         }
     }
 
@@ -985,6 +1037,9 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
                 break;
             case EBADVERSION:
                 rcToRet = BKException.Code.ProtocolVersionException;
+                break;
+            case ETRIMMED:
+                rcToRet = BKException.Code.EntryTrimmedException;
                 break;
             case EUA:
                 rcToRet = BKException.Code.UnauthorizedAccessException;

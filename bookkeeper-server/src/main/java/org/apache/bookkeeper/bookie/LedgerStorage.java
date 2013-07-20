@@ -109,6 +109,19 @@ public interface LedgerStorage {
     ByteBuffer getEntry(long ledgerId, long entryId) throws IOException;
 
     /**
+     * Trim all the the ledger entries up the lastEntryId included.
+     * <p>
+     * After an entry has been trimmed, the getEntry() behavior on that entry will be undefined. Depending on the
+     * LedgerStorage implementation, the trimming could have immediate effect, be delayed or just ignored.
+     *
+     * @param ledgerId the ledger id
+     * @param lastEntryId the id of the last entry (included) to be trimmed
+     * @throws IOException
+     *             if there is an error in the trim operation
+     */
+    void trimEntries(long ledgerId, long lastEntryId) throws IOException;
+
+    /**
      * Flushes all data in the storage. Once this is called,
      * add data written to the LedgerStorage up until this point
      * has been persisted to perminant storage

@@ -114,6 +114,22 @@ public class BookieProtoEncoding {
                 ChannelBufferOutputStream bufStream = new ChannelBufferOutputStream(buf);
                 am.writeTo(bufStream);
                 return buf;
+            } else if (r instanceof BookieProtocol.Request) {
+                int totalHeaderSize = 4 // for the length of the packet
+                                      + 4 // for request type
+                                      + 8 // for ledgerId
+                                      + 8; // for entryId
+
+                ChannelBuffer buf = bufferFactory.getBuffer(totalHeaderSize);
+                buf.writeInt(totalHeaderSize - 4);
+                buf.writeInt(new PacketHeader(r.getProtocolVersion(),
+                                              r.getOpCode(),
+                                              r.getFlags()).toInt());
+
+                buf.writeLong(r.getLedgerId());
+                buf.writeLong(r.getEntryId());
+
+                return buf;
             } else {
                 return msg;
             }
@@ -161,6 +177,10 @@ public class BookieProtoEncoding {
                     = BookkeeperProtocol.AuthMessage.newBuilder();
                 builder.mergeFrom(new ChannelBufferInputStream(packet), extensionRegistry);
                 return new BookieProtocol.AuthRequest(h.getVersion(), builder.build());
+            case BookieProtocol.TRIM:
+                ledgerId = packet.readLong();
+                entryId = packet.readLong();
+                return new BookieProtocol.TrimRequest(h.getVersion(), ledgerId, entryId);
             }
             return packet;
         }
