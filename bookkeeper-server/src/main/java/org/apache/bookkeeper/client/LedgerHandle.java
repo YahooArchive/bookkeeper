@@ -38,6 +38,7 @@ import org.apache.bookkeeper.client.AsyncCallback.CloseCallback;
 import org.apache.bookkeeper.client.AsyncCallback.ReadCallback;
 import org.apache.bookkeeper.client.AsyncCallback.ReadLastConfirmedCallback;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
+
 import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.proto.BookieProtocol;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
@@ -613,6 +614,46 @@ public class LedgerHandle {
         }
         lastAddPushed = Math.max(lastAddPushed, lac);
         length = Math.max(length, len);
+    }
+
+    /**
+     * Trim ledger entries up to entryId.
+     * <p>
+     * Tells the bookies in the quorum that we are no more interested in all the entries up to lastEntryId.
+     * <p>
+     * The trim operation is an "hint" to bookies so that they can skip storing and indexing the entries in which we
+     * have no more interest.
+     * <p>
+     * The behavior of calling readEntries() on entries that were already trimmed is undefined. The call with either
+     * succeed or fail saying the entry was not found.
+     * <p>
+     * This method is not blocking. The trimming is done asynchronously and no error is reported.
+     *
+     * @param lastEntryId
+     *            id last entry to be trimmed
+     * @return the entryId of the new inserted entry
+     */
+    public void asyncTrim(final long lastEntryId) {
+        if (metadata.isClosed()) {
+            LOG.debug("Attempt to trim a closed ledger: {}", ledgerId);
+            return;
+        }
+
+        if (lastEntryId > lastAddConfirmed) {
+            // The entries were already trimmed
+            return;
+        }
+
+        try {
+            bk.mainWorkerPool.submitOrdered(ledgerId, new SafeRunnable() {
+                @Override
+                public void safeRun() {
+                    new TrimOp(LedgerHandle.this, lastEntryId).initiate();
+                }
+            });
+        } catch (RuntimeException e) {
+            LOG.warn("Error sending trim operation for ledger {}", ledgerId, e);
+        }
     }
 
     /**

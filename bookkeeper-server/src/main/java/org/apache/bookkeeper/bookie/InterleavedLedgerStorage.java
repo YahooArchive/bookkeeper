@@ -255,6 +255,12 @@ public class InterleavedLedgerStorage implements CompactableLedgerStorage, Entry
             }
         }
     }
+    
+    @Override
+    public void trimEntries(long ledgerId, long lastEntryId) throws IOException {
+        // Ignore trimming request
+        LOG.debug("TrimEntries: {}@{}", ledgerId, lastEntryId);
+    }
 
     private void flushOrCheckpoint(boolean isCheckpointFlush)
             throws IOException {

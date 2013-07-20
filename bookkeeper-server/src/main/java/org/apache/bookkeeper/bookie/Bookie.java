@@ -171,6 +171,14 @@ public class Bookie extends BookieCriticalThread {
         }
     }
 
+    public static class EntryTrimmedException extends NoEntryException {
+        private static final long serialVersionUID = 1L;
+
+        public EntryTrimmedException(long ledgerId, long entryId) {
+            super("Entry " + entryId + " was already trimmed in " + ledgerId, ledgerId, entryId);
+        }
+    }
+
     // Write Callback do nothing
     static class NopWriteCallback implements WriteCallback {
         @Override
@@ -1168,6 +1176,13 @@ public class Bookie extends BookieCriticalThread {
         ByteBuffer entry = handle.readEntry(entryId);
         readBytes.add(entry.remaining());
         return entry;
+    }
+
+    public void trim(long ledgerId, long lastEntryId)
+            throws IOException, NoLedgerException {
+        LedgerDescriptor handle = handles.getReadOnlyHandle(ledgerId);
+        LOG.trace("Trim {}@{}", lastEntryId, ledgerId);
+        handle.trim(lastEntryId);
     }
 
     // The rest of the code is test stuff

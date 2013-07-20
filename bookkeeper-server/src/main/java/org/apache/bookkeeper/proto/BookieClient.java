@@ -214,6 +214,38 @@ public class BookieClient implements PerChannelBookieClientFactory {
         }
     }
 
+    public void trim(final BookieSocketAddress addr, final long ledgerId,
+                     final byte[] masterKey, final long lastEntryId,
+                     final int options) {
+        closeLock.readLock().lock();
+        try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Sending trim request {}@{} to bookie: {}",
+                          new Object[] {lastEntryId, ledgerId, addr});
+            }
+            final PerChannelBookieClientPool client = lookupClient(addr, ledgerId);
+            if (client == null) {
+                LOG.warn("Could not get client to trim {}@{} on bookie: {}",
+                         new Object[] { lastEntryId, ledgerId, addr });
+                return;
+            }
+
+            client.obtain(new GenericCallback<PerChannelBookieClient>() {
+                    @Override
+                    public void operationComplete(final int rc, PerChannelBookieClient pcbc) {
+                        if (rc != BKException.Code.OK) {
+                            LOG.warn("Failed to trim {}@{} on bookie: {}, rc = {}",
+                                     new Object[] { lastEntryId, ledgerId, addr, rc });
+                            return;
+                        }
+                        pcbc.trim(ledgerId, masterKey, lastEntryId, options);
+                    }
+                });
+        } finally {
+            closeLock.readLock().unlock();
+        }
+    }
+
     public void readEntryAndFenceLedger(final BookieSocketAddress addr,
                                         final long ledgerId,
                                         final byte[] masterKey,
