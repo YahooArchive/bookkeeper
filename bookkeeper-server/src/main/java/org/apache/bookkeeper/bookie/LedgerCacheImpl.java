@@ -38,7 +38,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.bookkeeper.util.SnapshotMap;
-import org.apache.bookkeeper.bookie.Bookie.NoLedgerException;
 import org.apache.bookkeeper.bookie.LedgerDirsManager.LedgerDirsListener;
 import org.apache.bookkeeper.bookie.LedgerDirsManager.NoWritableLedgerDirException;
 import org.apache.bookkeeper.conf.ServerConfiguration;
@@ -421,21 +420,22 @@ public class LedgerCacheImpl implements LedgerCache {
      */
     private void flushLedger(long l) throws IOException {
         LinkedList<Long> firstEntryList;
+        FileInfo fi;
+        try {
+            fi = getFileInfo(l, null);
+        } catch (Bookie.NoLedgerException nle) {
+            // ledger has been deleted
+            return;
+        }
         synchronized(this) {
             HashMap<Long, LedgerEntryPage> pageMap = pages.get(l);
             if (pageMap == null || pageMap.isEmpty()) {
-                FileInfo fi = null;
                 try {
-                    fi = getFileInfo(l, null);
                     fi.flushHeader();
-                } catch (NoLedgerException e) {
-                    LOG.info("Ledger not found when flushing {}", l);
-                    return;
                 } finally {
-                    if (null != fi) {
-                        fi.release();
-                    }
+                    fi.release();
                 }
+
                 return;
             }
             firstEntryList = new LinkedList<Long>();
@@ -457,7 +457,6 @@ public class LedgerCacheImpl implements LedgerCache {
 
         // Now flush all the pages of a ledger
         List<LedgerEntryPage> entries = new ArrayList<LedgerEntryPage>(firstEntryList.size());
-        FileInfo fi = null;
         try {
             for(Long firstEntry: firstEntryList) {
                 LedgerEntryPage lep = getLedgerEntryPage(l, firstEntry, true);
@@ -472,7 +471,6 @@ public class LedgerCacheImpl implements LedgerCache {
                     }
                     });
             ArrayList<Integer> versions = new ArrayList<Integer>(entries.size());
-            fi = getFileInfo(l, null);
             // flush the header if necessary
             fi.flushHeader();
             int start = 0;
