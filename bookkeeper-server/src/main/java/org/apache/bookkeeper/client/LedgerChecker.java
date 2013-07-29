@@ -84,8 +84,14 @@ public class LedgerChecker {
         bookieClient = bkc.getBookieClient();
     }
 
-    private void verifyLedgerFragment(LedgerFragment fragment,
+    private void verifyLedgerFragment(LedgerHandle lh, LedgerFragment fragment,
             GenericCallback<LedgerFragment> cb) throws InvalidFragmentException {
+        if (!lh.bk.bookieWatcher.isBookieAvailable(fragment.getAddress())) {
+            // If the bookie associated with this fragment is not available we don't even need to try to read the entry
+            cb.operationComplete(BKException.Code.BookieHandleNotAvailableException, fragment);
+            return;
+        }
+
         long firstStored = fragment.getFirstStoredEntryId();
         long lastStored = fragment.getLastStoredEntryId();
 
@@ -171,7 +177,7 @@ public class LedgerChecker {
      * Check that all the fragments in the passed in ledger, and report those
      * which are missing.
      */
-    public void checkLedger(LedgerHandle lh,
+    public void checkLedger(final LedgerHandle lh,
                             final GenericCallback<Set<LedgerFragment>> cb) {
         // build a set of all fragment replicas
         final Set<LedgerFragment> fragments = new HashSet<LedgerFragment>();
@@ -229,14 +235,12 @@ public class LedgerChecker {
                                                       if (result) {
                                                           fragments.addAll(finalSegmentFragments);
                                                       }
-                                                      checkFragments(fragments, cb);
+                                                      checkFragments(lh, fragments, cb);
                                                   }
                                               });
-
                 for (int bi : lh.getDistributionSchedule().getWriteSet(entryToRead)) {
                     InetSocketAddress addr = curEnsemble.get(bi);
-                    bookieClient.readEntry(addr, lh.getId(),
-                                           entryToRead, eecb, null);
+                    bookieClient.readEntry(addr, lh.getId(), entryToRead, eecb, null);
                 }
                 return;
             } else {
@@ -244,10 +248,11 @@ public class LedgerChecker {
             }
         }
 
-        checkFragments(fragments, cb);
+        checkFragments(lh, fragments, cb);
     }
 
-    private void checkFragments(Set<LedgerFragment> fragments,
+    private void checkFragments(LedgerHandle lh,
+                                Set<LedgerFragment> fragments,
                                 GenericCallback<Set<LedgerFragment>> cb) {
         if (fragments.size() == 0) { // no fragments to verify
             cb.operationComplete(BKException.Code.OK, fragments);
@@ -260,7 +265,7 @@ public class LedgerChecker {
         for (LedgerFragment r : fragments) {
             LOG.debug("Checking fragment {}", r);
             try {
-                verifyLedgerFragment(r, allFragmentsCb);
+                verifyLedgerFragment(lh, r, allFragmentsCb);
             } catch (InvalidFragmentException ife) {
                 LOG.error("Invalid fragment found : {}", r);
                 allFragmentsCb.operationComplete(

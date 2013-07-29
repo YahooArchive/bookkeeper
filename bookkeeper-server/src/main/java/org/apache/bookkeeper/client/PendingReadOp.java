@@ -161,12 +161,37 @@ class PendingReadOp implements Enumeration<LedgerEntry>, ReadEntryCallback {
                 return null;
             }
 
-            int replica = nextReplicaIndexToReadFrom;
-            int bookieIndex = lh.distributionSchedule.getWriteSet(entryId).get(nextReplicaIndexToReadFrom);
-            nextReplicaIndexToReadFrom++;
+            int replica = -1;
+            InetSocketAddress to = null;
+            while (nextReplicaIndexToReadFrom < getLedgerMetadata().getWriteQuorumSize()) {
+                LOG.debug("nextReplicaIndexToReadFrom: {}", nextReplicaIndexToReadFrom);
+                replica = nextReplicaIndexToReadFrom;
+                int bookieIndex = lh.distributionSchedule.getWriteSet(entryId).get(nextReplicaIndexToReadFrom);
+                nextReplicaIndexToReadFrom++;
+                to = ensemble.get(bookieIndex);
+
+                if (!lh.bk.bookieWatcher.isBookieAvailable(to)) {
+                    LOG.debug("Ignoring non available bookie for reading: {}", to);
+                    sentReplicas.set(replica);
+                    erroredReplicas.set(replica);
+                    continue;
+                } else {
+                    // The bookie is available, so we can use it
+                    break;
+                }
+            }
+
+            if (nextReplicaIndexToReadFrom > getLedgerMetadata().getWriteQuorumSize()) {
+                LOG.debug("There are no more bookies left to try");
+                // There wasn't any more bookie available for reading the entry
+                if (firstError == BKException.Code.OK) {
+                    firstError = BKException.Code.BookieHandleNotAvailableException;
+                }
+                submitCallback(firstError);
+                return null;
+            }
 
             try {
-                InetSocketAddress to = ensemble.get(bookieIndex);
                 sendReadTo(to, this);
                 sentReplicas.set(replica);
                 return to;

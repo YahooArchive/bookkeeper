@@ -25,10 +25,11 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.apache.bookkeeper.client.BKException.BKNotEnoughBookiesException;
 import org.apache.bookkeeper.conf.ClientConfiguration;
@@ -64,6 +65,7 @@ class BookieWatcher implements Watcher, ChildrenCallback {
     final BookKeeper bk;
 
     HashSet<InetSocketAddress> knownBookies = new HashSet<InetSocketAddress>();
+    final ReadWriteLock bookiesMutex = new ReentrantReadWriteLock();
     final ScheduledExecutorService scheduler;
 
     SafeRunnable reReadTask = new SafeRunnable() {
@@ -114,12 +116,15 @@ class BookieWatcher implements Watcher, ChildrenCallback {
         HashSet<InetSocketAddress> newBookieAddrs = convertToBookieAddresses(children);
 
         final HashSet<InetSocketAddress> deadBookies;
-        synchronized (this) {
+        bookiesMutex.writeLock().lock();
+        try {
             deadBookies = (HashSet<InetSocketAddress>)knownBookies.clone();
             deadBookies.removeAll(newBookieAddrs);
             // No need to close readonly bookie clients.
             deadBookies.removeAll(readOnlyBookieWatcher.getReadOnlyBookies());
             knownBookies = newBookieAddrs;
+        } finally {
+            bookiesMutex.writeLock().unlock();
         }
 
         if (bk.getBookieClient() != null) {
@@ -210,8 +215,11 @@ class BookieWatcher implements Watcher, ChildrenCallback {
 
         List<InetSocketAddress> allBookies;
 
-        synchronized (this) {
+        bookiesMutex.readLock().lock();
+        try {
             allBookies = new ArrayList<InetSocketAddress>(knownBookies);
+        } finally {
+            bookiesMutex.readLock().unlock();
         }
 
         Collections.shuffle(allBookies);
@@ -230,6 +238,15 @@ class BookieWatcher implements Watcher, ChildrenCallback {
         }
 
         throw new BKNotEnoughBookiesException();
+    }
+
+    public boolean isBookieAvailable(InetSocketAddress bookie) {
+        bookiesMutex.readLock().lock();
+        try {
+            return knownBookies.contains(bookie);
+        } finally {
+            bookiesMutex.readLock().unlock();
+        }
     }
 
     /**

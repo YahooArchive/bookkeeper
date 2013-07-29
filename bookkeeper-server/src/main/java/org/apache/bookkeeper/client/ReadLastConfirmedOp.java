@@ -17,13 +17,15 @@
  */
 package org.apache.bookkeeper.client;
 
+import java.net.InetSocketAddress;
+
 import org.apache.bookkeeper.client.BKException.BKDigestMatchException;
 import org.apache.bookkeeper.client.DigestManager.RecoveryData;
-import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback;
 import org.apache.bookkeeper.proto.BookieProtocol;
+import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback;
+import org.jboss.netty.buffer.ChannelBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.jboss.netty.buffer.ChannelBuffer;
 
 /**
  * This class encapsulated the read last confirmed operation.
@@ -54,12 +56,26 @@ class ReadLastConfirmedOp implements ReadEntryCallback {
         this.coverageSet = lh.distributionSchedule.getCoverageSet();
     }
 
-    public void initiate() {
+    public synchronized void initiate() {
         for (int i = 0; i < lh.metadata.currentEnsemble.size(); i++) {
-            lh.bk.bookieClient.readEntry(lh.metadata.currentEnsemble.get(i),
+            InetSocketAddress bookie = lh.metadata.currentEnsemble.get(i);
+            LOG.debug("reading last entry for ledger {} from bookie {}", lh.getId(), bookie);
+            if (!lh.bk.bookieWatcher.isBookieAvailable(bookie)) {
+                LOG.debug("Skipping non-available bookie {} when reading last confirmed entry for ledger {}", bookie,
+                        lh.getId());
+                --numResponsesPending;
+                continue;
+            }
+
+            lh.bk.bookieClient.readEntry(bookie,
                                          lh.ledgerId,
                                          BookieProtocol.LAST_ADD_CONFIRMED,
                                          this, i);
+        }
+
+        if (numResponsesPending == 0) {
+            // It means we had no online bookie to read from
+            cb.readLastConfirmedDataComplete(BKException.Code.LedgerRecoveryException, maxRecoveredData);
         }
     }
 
