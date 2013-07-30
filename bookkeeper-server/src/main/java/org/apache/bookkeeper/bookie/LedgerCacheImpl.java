@@ -451,7 +451,7 @@ public class LedgerCacheImpl implements LedgerCache {
 
         if (firstEntryList.size() == 0) {
             LOG.debug("Nothing to flush for ledger {}.", l);
-            // nothing to do
+            fi.release();
             return;
         }
 
