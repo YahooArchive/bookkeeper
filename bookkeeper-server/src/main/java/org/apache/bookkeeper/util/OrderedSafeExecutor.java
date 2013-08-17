@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
 /**
  * This class provides 2 things over the java {@link ScheduledExecutorService}.
  *
@@ -46,13 +48,18 @@ public class OrderedSafeExecutor {
     Random rand = new Random();
 
     public OrderedSafeExecutor(int numThreads) {
+        this(numThreads, "OrderedSafeExecutor");
+    }
+
+    public OrderedSafeExecutor(int numThreads, String namePrefix) {
         if (numThreads <= 0) {
             throw new IllegalArgumentException();
         }
 
         threads = new ExecutorService[numThreads];
         for (int i = 0; i < numThreads; i++) {
-            threads[i] = Executors.newSingleThreadExecutor();
+            threads[i] = Executors.newSingleThreadExecutor(new ThreadFactoryBuilder().setNameFormat(namePrefix + "-" + i)
+                    .build());
         }
     }
 

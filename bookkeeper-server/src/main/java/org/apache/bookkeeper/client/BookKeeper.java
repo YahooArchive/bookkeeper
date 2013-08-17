@@ -132,7 +132,7 @@ public class BookKeeper {
                                                                 Executors.newCachedThreadPool());
         this.scheduler = Executors.newSingleThreadScheduledExecutor();
 
-        mainWorkerPool = new OrderedSafeExecutor(conf.getNumWorkerThreads());
+        mainWorkerPool = new OrderedSafeExecutor(conf.getNumWorkerThreads(), "bookkeeper-worker");
         bookieClient = new BookieClient(conf, channelFactory, mainWorkerPool);
         bookieWatcher = new BookieWatcher(conf, scheduler, this);
         bookieWatcher.readBookiesBlocking();
@@ -196,7 +196,7 @@ public class BookKeeper {
         this.channelFactory = channelFactory;
         this.scheduler = Executors.newSingleThreadScheduledExecutor();
 
-        mainWorkerPool = new OrderedSafeExecutor(conf.getNumWorkerThreads());
+        mainWorkerPool = new OrderedSafeExecutor(conf.getNumWorkerThreads(), "bookkeeper-worker");
         bookieClient = new BookieClient(conf, channelFactory, mainWorkerPool);
         bookieWatcher = new BookieWatcher(conf, scheduler, this);
         bookieWatcher.readBookiesBlocking();
