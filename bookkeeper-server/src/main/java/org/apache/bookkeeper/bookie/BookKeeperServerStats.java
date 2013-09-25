@@ -83,4 +83,5 @@ public interface BookKeeperServerStats {
     public final static String LD_INDEX_SCOPE = "index";
     public final static String LD_WRITABLE_DIRS = "writable_dirs";
 
+    public final static String STORAGE_SCOPE = "storage";
 }
