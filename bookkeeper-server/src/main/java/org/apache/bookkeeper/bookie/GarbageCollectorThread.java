@@ -31,16 +31,16 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.google.common.util.concurrent.RateLimiter;
-
 import org.apache.bookkeeper.bookie.EntryLogger.EntryLogScanner;
 import org.apache.bookkeeper.bookie.GarbageCollector.GarbageCleaner;
+import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.meta.LedgerManager;
 import org.apache.bookkeeper.util.MathUtils;
-import org.apache.bookkeeper.util.SnapshotMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.util.concurrent.RateLimiter;
 
 /**
  * This is the garbage collector thread that runs in the background to
@@ -75,9 +75,7 @@ public class GarbageCollectorThread extends Thread {
     // Entry Logger Handle
     final EntryLogger entryLogger;
 
-    // Ledger Cache Handle
-    final LedgerCache ledgerCache;
-    final SnapshotMap<Long, Boolean> activeLedgers;
+    final CompactableLedgerStorage ledgerStorage;
 
     // flag to ensure gc thread will not be interrupted during compaction
     // to reduce the risk getting entry log corrupted
@@ -91,15 +89,44 @@ public class GarbageCollectorThread extends Thread {
     final GarbageCollector garbageCollector;
     final GarbageCleaner garbageCleaner;
 
-    private static class Offset {
-        final long ledger;
-        final long entry;
-        final long offset;
+    /**
+     * Interface that identifies LedgerStorage implementations using EntryLogger and running periodic entries compaction
+     */
+    public interface CompactableLedgerStorage extends LedgerStorage {
 
-        Offset(long ledger, long entry, long offset) {
-            this.ledger = ledger;
-            this.entry = entry;
-            this.offset = offset;
+        /**
+         * @return the EntryLogger used by the ledger storage
+         */
+        EntryLogger getEntryLogger();
+
+        /**
+         * Get an iterator over a range of ledger ids stored in the bookie.
+         * 
+         * @param firstLedgerId first ledger id in the sequence (included)
+         * @param lastLedgerId last ledger id in the sequence (not included)
+         * @return
+         */
+        Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId);
+
+        /**
+         * Update the location of several entries and sync the underlying storage
+         * 
+         * @param locations
+         *            the list of locations to update
+         * @throws IOException
+         */
+        void updateEntriesLocations(Iterable<EntryLocation> locations) throws IOException;
+
+        public static class EntryLocation {
+            public final long ledger;
+            public final long entry;
+            public final long location;
+
+            public EntryLocation(long ledger, long entry, long location) {
+                this.ledger = ledger;
+                this.entry = entry;
+                this.location = location;
+            }
         }
     }
 
@@ -107,7 +134,7 @@ public class GarbageCollectorThread extends Thread {
      * A scanner wrapper to check whether a ledger is alive in an entry log file
      */
     class CompactionScannerFactory implements EntryLogger.EntryLogListener {
-        List<Offset> offsets = new ArrayList<Offset>();
+        List<EntryLocation> offsets = new ArrayList<EntryLocation>();
 
         EntryLogScanner newScanner(final EntryLogMetadata meta) {
             final RateLimiter rateLimiter = RateLimiter.create(compactionRate);
@@ -131,7 +158,7 @@ public class GarbageCollectorThread extends Thread {
 
                         long newoffset = entryLogger.addEntry(ledgerId, entry);
                         flushed.set(false);
-                        offsets.add(new Offset(ledgerId, entryId, newoffset));
+                        offsets.add(new EntryLocation(ledgerId, entryId, newoffset));
                     }
                 }
             };
@@ -167,16 +194,15 @@ public class GarbageCollectorThread extends Thread {
                 throw new IOException("Interrupted waiting for flush", ie);
             }
 
-            for (Offset o : offsets) {
-                ledgerCache.putEntryOffset(o.ledger, o.entry, o.offset);
-            }
+            ledgerStorage.updateEntriesLocations(offsets);
             offsets.clear();
         }
 
         synchronized void flush() throws IOException {
             waitEntrylogFlushed();
 
-            ledgerCache.flushLedger(true);
+            ledgerStorage.updateEntriesLocations(offsets);
+            offsets.clear();
         }
     }
 
@@ -189,16 +215,13 @@ public class GarbageCollectorThread extends Thread {
      * @throws IOException
      */
     public GarbageCollectorThread(ServerConfiguration conf,
-                                  final LedgerCache ledgerCache,
-                                  EntryLogger entryLogger,
-                                  SnapshotMap<Long, Boolean> activeLedgers,
-                                  LedgerManager ledgerManager)
+                                  LedgerManager ledgerManager,
+                                  final CompactableLedgerStorage ledgerStorage)
         throws IOException {
         super("GarbageCollectorThread");
 
-        this.ledgerCache = ledgerCache;
-        this.entryLogger = entryLogger;
-        this.activeLedgers = activeLedgers;
+        this.entryLogger = ledgerStorage.getEntryLogger();
+        this.ledgerStorage = ledgerStorage;
 
         this.gcWaitTime = conf.getGcWaitTime();
         this.maxOutstandingRequests = conf.getCompactionMaxOutstandingRequests();
@@ -213,14 +236,15 @@ public class GarbageCollectorThread extends Thread {
                     if (LOG.isDebugEnabled()) {
                         LOG.debug("delete ledger : " + ledgerId);
                     }
-                    ledgerCache.deleteLedger(ledgerId);
+
+                    ledgerStorage.deleteLedger(ledgerId);
                 } catch (IOException e) {
                     LOG.error("Exception when deleting the ledger index file on the Bookie: ", e);
                 }
             }
         };
 
-        this.garbageCollector = new ScanAndCompareGarbageCollector(ledgerManager, activeLedgers);
+        this.garbageCollector = new ScanAndCompareGarbageCollector(ledgerManager, ledgerStorage);
 
         // compaction parameters
         minorCompactionThreshold = conf.getMinorCompactionThreshold();
@@ -330,8 +354,12 @@ public class GarbageCollectorThread extends Thread {
             EntryLogMetadata meta = entryLogMetaMap.get(entryLogId);
             for (Long entryLogLedger : meta.ledgersMap.keySet()) {
                 // Remove the entry log ledger from the set if it isn't active.
-                if (!activeLedgers.containsKey(entryLogLedger)) {
-                    meta.removeLedger(entryLogLedger);
+                try {
+                    if (!ledgerStorage.ledgerExists(entryLogLedger)) {
+                        meta.removeLedger(entryLogLedger);
+                    }
+                } catch (IOException e) {
+                    LOG.error("Error reading from ledger storage", e);
                 }
             }
             if (meta.isEmpty()) {

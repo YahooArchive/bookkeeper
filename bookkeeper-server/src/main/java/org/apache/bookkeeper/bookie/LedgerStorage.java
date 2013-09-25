@@ -24,13 +24,25 @@ package org.apache.bookkeeper.bookie;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.jmx.BKMBeanInfo;
+import org.apache.bookkeeper.meta.LedgerManager;
 
 /**
  * Interface for storing ledger data
  * on persistant storage.
  */
-interface LedgerStorage {
+public interface LedgerStorage {
+
+    /**
+     * Initialize the LedgerStorage implementation
+     * 
+     * @param conf
+     * @param ledgerManager
+     * @param ledgerDirsManager
+     */
+    void initialize(ServerConfiguration conf, LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager) throws IOException;
+
     /**
      * Start any background threads
      * belonging to the storage system. For example,
@@ -101,6 +113,13 @@ interface LedgerStorage {
      * has been persisted to perminant storage
      */
     void flush() throws IOException;
+
+    /**
+     * 
+     * @param ledgerId
+     * @throws IOException
+     */
+    void deleteLedger(long ledgerId) throws IOException;
 
     /**
      * Get the JMX management bean for this LedgerStorage
