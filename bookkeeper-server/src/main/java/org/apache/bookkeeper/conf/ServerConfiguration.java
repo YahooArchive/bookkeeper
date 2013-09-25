@@ -25,6 +25,7 @@ import org.apache.bookkeeper.stats.NullStatsProvider;
 import org.apache.bookkeeper.stats.StatsProvider;
 import org.apache.bookkeeper.util.ReflectionUtils;
 import org.apache.commons.configuration.ConfigurationException;
+import org.apache.bookkeeper.bookie.InterleavedLedgerStorage;
 import org.apache.commons.lang.StringUtils;
 
 /**
@@ -108,6 +109,8 @@ public class ServerConfiguration extends AbstractConfiguration {
     // Statistics Parameters
     protected final static String ENABLE_STATISTICS = "enableStatistics";
     protected final static String STATS_PROVIDER_CLASS = "statsProviderClass";
+
+    protected final static String LEDGER_STORAGE_CLASS = "ledgerStorageClass";
 
     // Bookie auth provider factory class name
     protected final static String BOOKIE_AUTH_PROVIDER_FACTORY_CLASS
@@ -1292,6 +1295,26 @@ public class ServerConfiguration extends AbstractConfiguration {
      */
     public ServerConfiguration setJournalRemovePagesFromCache(boolean enabled) {
         setProperty(JOURNAL_REMOVE_FROM_PAGE_CACHE, enabled);
+        return this;
+    }
+
+    /*
+     * Get the {@link LedgerStorage} implementation class name
+     * 
+     * @return the class name
+     */
+    public String getLedgerStorageClass() {
+        return getString(LEDGER_STORAGE_CLASS, InterleavedLedgerStorage.class.getName());
+    }
+
+    /**
+     * Set the {@link LedgerStorage} implementation class name
+     * 
+     * @param ledgerStorageClass the class name
+     * @return ServerConfiguration
+     */
+    public ServerConfiguration setLedgerStorageClass(String ledgerStorageClass) {
+        setProperty(LEDGER_STORAGE_CLASS, ledgerStorageClass);
         return this;
     }
 
