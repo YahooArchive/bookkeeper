@@ -120,7 +120,7 @@ public class EntryLogger {
         /**
          * Rotate a new entry log to write.
          */
-        public void onRotateEntryLog();
+        public void onEntryLogFlushed();
     }
 
     /**
@@ -350,7 +350,7 @@ public class EntryLogger {
         }
         somethingWritten = false;
         for (EntryLogListener listener: listeners) {
-            listener.onRotateEntryLog();
+            listener.onEntryLogFlushed();
         }
     }
 
