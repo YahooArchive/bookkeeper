@@ -4,7 +4,7 @@ yroot_remove: false
 
 yroot_x86_64_rhel_image: 6.3-20120918
 
-provision_yinst_version: rhel6stable
+provision_yinst_version: stable
 
 dist_key_file: /home/y/conf/keydb/sherpa_build.keydb
 dist_nomail: true
