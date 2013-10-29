@@ -23,8 +23,6 @@ Release 4.2.2 - 2013-09-10
         BOOKKEEPER-595: Crash of inprocess autorecovery daemon should not take down the bookie (ivank)
 
 
-        BOOKKEEPER-584: Data loss when ledger metadata is overwritten (sijie via ivank)
-
         BOOKKEEPER-577: BookieFailureTest uses sync/wait()/notify() incorrectly (ivank)
 
 	BOOKKEEPER-626: BOOKIE_EXTRA_OPTS are added twice (vinay via fpj)
