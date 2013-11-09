@@ -119,7 +119,6 @@ Release 4.2.1 - 2013-02-19
 
         BOOKKEEPER-548: Document about periodic ledger checker configuration (ivank)
 
-        BOOKKEEPER-554: fd leaking when move ledger index file (sijie via ivank)
 
         BOOKKEEPER-568: NPE during GC with HierarchicalLedgerManager (Matteo via sijie)
 
