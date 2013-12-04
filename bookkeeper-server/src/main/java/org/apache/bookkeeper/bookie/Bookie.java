@@ -1120,6 +1120,10 @@ public class Bookie extends Thread {
         LOG.trace("Trim {}@{}", lastEntryId, ledgerId);
         handle.trim(lastEntryId);
     }
+    
+    public LedgerStorage getLedgerStorage() {
+        return ledgerStorage;
+    }
 
     // The rest of the code is test stuff
     static class CounterCallback implements WriteCallback {
