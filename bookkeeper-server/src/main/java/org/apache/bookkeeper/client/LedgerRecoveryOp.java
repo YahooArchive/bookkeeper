@@ -155,7 +155,9 @@ class LedgerRecoveryOp implements ReadCallback, AddCallback {
             return;
         }
 
-        if (rc == BKException.Code.NoSuchEntryException || rc == BKException.Code.NoSuchLedgerExistsException) {
+        if (rc == BKException.Code.NoSuchEntryException
+            || rc == BKException.Code.NoSuchLedgerExistsException
+            || rc == BKException.Code.EntryTrimmedException) {
             readDone.set(true);
             if (readCount.get() == writeCount.get()) {
                 closeAndCallback();

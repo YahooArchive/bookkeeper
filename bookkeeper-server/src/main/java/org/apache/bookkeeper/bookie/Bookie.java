@@ -485,14 +485,15 @@ public class Bookie extends BookieCriticalThread {
         // instantiate the journal
         journal = new Journal(conf, ledgerDirsManager, statsLogger.scope(JOURNAL_SCOPE));
 
+        String ledgerStorageClass = conf.getLedgerStorageClass();
         // Check the type of storage.
-        if (conf.getSortedLedgerStorageEnabled()) {
+        if (ledgerStorageClass.equals(InterleavedLedgerStorage.class.getName())
+            && conf.getSortedLedgerStorageEnabled()) {
             ledgerStorage = new SortedLedgerStorage();
             ledgerStorage.initialize(conf, ledgerManager,
                                      ledgerDirsManager, indexDirsManager,
                                      journal, statsLogger);
         } else {
-            String ledgerStorageClass = conf.getLedgerStorageClass();
             LOG.info("using ledger storage: {}", ledgerStorageClass);
             ledgerStorage = LedgerStorageFactory.createLedgerStorage(ledgerStorageClass);
             ledgerStorage.initialize(conf, ledgerManager, ledgerDirsManager,
@@ -1183,6 +1184,11 @@ public class Bookie extends BookieCriticalThread {
         LedgerDescriptor handle = handles.getReadOnlyHandle(ledgerId);
         LOG.trace("Trim {}@{}", lastEntryId, ledgerId);
         handle.trim(lastEntryId);
+    }
+    
+    @VisibleForTesting
+    public LedgerStorage getLedgerStorage() {
+        return ledgerStorage;
     }
 
     // The rest of the code is test stuff
