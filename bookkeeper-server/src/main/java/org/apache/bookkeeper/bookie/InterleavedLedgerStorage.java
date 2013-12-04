@@ -21,16 +21,16 @@
 
 package org.apache.bookkeeper.bookie;
 
-import java.nio.ByteBuffer;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Map;
+import java.util.NavigableMap;
 
-import org.apache.bookkeeper.jmx.BKMBeanInfo;
 import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.jmx.BKMBeanInfo;
 import org.apache.bookkeeper.meta.LedgerManager;
 import org.apache.bookkeeper.proto.BookieProtocol;
 import org.apache.bookkeeper.util.SnapshotMap;
-import org.apache.zookeeper.ZooKeeper;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,7 +39,7 @@ import org.slf4j.LoggerFactory;
  * This ledger storage implementation stores all entries in a single
  * file and maintains an index file for each ledger.
  */
-class InterleavedLedgerStorage implements LedgerStorage {
+public class InterleavedLedgerStorage implements LedgerStorage {
     final static Logger LOG = LoggerFactory.getLogger(InterleavedLedgerStorage.class);
 
     EntryLogger entryLogger;
@@ -51,16 +51,18 @@ class InterleavedLedgerStorage implements LedgerStorage {
     // This is the thread that garbage collects the entry logs that do not
     // contain any active ledgers in them; and compacts the entry logs that
     // has lower remaining percentage to reclaim disk space.
-    final GarbageCollectorThread gcThread;
+    GarbageCollectorThread gcThread;
 
-    InterleavedLedgerStorage(ServerConfiguration conf,
-                             LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager)
-			throws IOException {
+    InterleavedLedgerStorage() {
         activeLedgers = new SnapshotMap<Long, Boolean>();
+    }
+
+    @Override
+    public void initialize(ServerConfiguration conf, LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager)
+            throws IOException {
         entryLogger = new EntryLogger(conf, ledgerDirsManager);
         ledgerCache = new LedgerCacheImpl(conf, activeLedgers, ledgerDirsManager);
-        gcThread = new GarbageCollectorThread(conf, ledgerCache, entryLogger,
-                activeLedgers, ledgerManager);
+        gcThread = new GarbageCollectorThread(conf, entryLogger, ledgerManager, this);
     }
 
     @Override
@@ -142,6 +144,12 @@ class InterleavedLedgerStorage implements LedgerStorage {
         }
         return ByteBuffer.wrap(entryLogger.readEntry(ledgerId, entryId, offset));
     }
+    
+    @Override
+    public void trimEntries(long ledgerId, long lastEntryId) throws IOException {
+        // Ignore trimming request
+        LOG.debug("TrimEntries: {}@{}", ledgerId, lastEntryId);
+    }
 
     @Override
     public boolean isFlushRequired() {
@@ -171,6 +179,39 @@ class InterleavedLedgerStorage implements LedgerStorage {
         if (flushFailed) {
             throw new IOException("Flushing to storage failed, check logs");
         }
+    }
+
+    @Override
+    public void deleteLedger(long ledgerId) throws IOException {
+        activeLedgers.remove(ledgerId);
+        ledgerCache.deleteLedger(ledgerId);
+    }
+
+    @Override
+    public void deleteAllLedgers() throws IOException {
+        // create a snapshot first
+        NavigableMap<Long, Boolean> bkActiveLedgersSnapshot = activeLedgers.snapshot();
+        for (long ledgerId : bkActiveLedgersSnapshot.keySet()) {
+            deleteLedger(ledgerId);
+        }
+    }
+
+    @Override
+    public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId) {
+        NavigableMap<Long, Boolean> bkActiveLedgersSnapshot = activeLedgers.snapshot();
+        Map<Long, Boolean> subBkActiveLedgers = bkActiveLedgersSnapshot
+                .subMap(firstLedgerId, true, lastLedgerId, false);
+
+        return subBkActiveLedgers.keySet();
+    }
+
+    @Override
+    public void updateEntriesLocations(Iterable<EntryLocation> locations) throws IOException {
+        for (EntryLocation l : locations) {
+            ledgerCache.putEntryOffset(l.ledger, l.entry, l.location);
+        }
+
+        ledgerCache.flushLedger(true);
     }
 
     @Override

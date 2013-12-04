@@ -21,11 +21,15 @@
 
 package org.apache.bookkeeper.meta;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Queue;
 import java.util.Random;
 import java.util.Set;
@@ -35,11 +39,17 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.apache.bookkeeper.bookie.BookieException;
 import org.apache.bookkeeper.bookie.GarbageCollector;
+import org.apache.bookkeeper.bookie.LedgerDirsManager;
+import org.apache.bookkeeper.bookie.LedgerStorage;
+import org.apache.bookkeeper.bookie.LedgerStorage.EntryLocation;
 import org.apache.bookkeeper.bookie.ScanAndCompareGarbageCollector;
 import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
 import org.apache.bookkeeper.client.LedgerMetadata;
+import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.jmx.BKMBeanInfo;
 import org.apache.bookkeeper.meta.LedgerManager.LedgerRange;
 import org.apache.bookkeeper.meta.LedgerManager.LedgerRangeIterator;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
@@ -63,23 +73,23 @@ public class GcLedgersTest extends LedgerManagerTestCase {
      */
     private void createLedgers(int numLedgers, final Set<Long> createdLedgers) {
         final AtomicInteger expected = new AtomicInteger(numLedgers);
-        for (int i=0; i<numLedgers; i++) {
+        for (int i = 0; i < numLedgers; i++) {
             getLedgerManager().createLedger(new LedgerMetadata(1, 1, 1, DigestType.MAC, "".getBytes()),
-                new GenericCallback<Long>() {
-                @Override
-                public void operationComplete(int rc, Long ledgerId) {
-                    if (rc == BKException.Code.OK) {
-                        activeLedgers.put(ledgerId, true);
-                        createdLedgers.add(ledgerId);
-                    }
-                    synchronized (expected) {
-                        int num = expected.decrementAndGet();
-                        if (num == 0) {
-                            expected.notify();
+                    new GenericCallback<Long>() {
+                        @Override
+                        public void operationComplete(int rc, Long ledgerId) {
+                            if (rc == BKException.Code.OK) {
+                                activeLedgers.put(ledgerId, true);
+                                createdLedgers.add(ledgerId);
+                            }
+                            synchronized (expected) {
+                                int num = expected.decrementAndGet();
+                                if (num == 0) {
+                                    expected.notify();
+                                }
+                            }
                         }
-                    }
-                }
-            });
+                    });
         }
         synchronized (expected) {
             try {
@@ -94,19 +104,18 @@ public class GcLedgersTest extends LedgerManagerTestCase {
     private void removeLedger(long ledgerId) throws Exception {
         final AtomicInteger rc = new AtomicInteger(0);
         final CountDownLatch latch = new CountDownLatch(1);
-        getLedgerManager().removeLedgerMetadata(ledgerId, Version.ANY,
-                new GenericCallback<Void>() {
-                    @Override
-                    public void operationComplete(int rc2, Void result) {
-                        rc.set(rc2);
-                        latch.countDown();
-                    }
-                   });
+        getLedgerManager().removeLedgerMetadata(ledgerId, Version.ANY, new GenericCallback<Void>() {
+            @Override
+            public void operationComplete(int rc2, Void result) {
+                rc.set(rc2);
+                latch.countDown();
+            }
+        });
         assertTrue(latch.await(10, TimeUnit.SECONDS));
         assertEquals("Remove should have succeeded", 0, rc.get());
     }
 
-    @Test(timeout=60000)
+    @Test(timeout = 60000)
     public void testGarbageCollectLedgers() throws Exception {
         int numLedgers = 100;
         int numRemovedLedgers = 10;
@@ -122,18 +131,17 @@ public class GcLedgersTest extends LedgerManagerTestCase {
         tmpList.addAll(createdLedgers);
         Collections.shuffle(tmpList, r);
         // random remove several ledgers
-        for (int i=0; i<numRemovedLedgers; i++) {
+        for (int i = 0; i < numRemovedLedgers; i++) {
             long ledgerId = tmpList.get(i);
             synchronized (removedLedgers) {
-                getLedgerManager().removeLedgerMetadata(ledgerId, Version.ANY,
-                    new GenericCallback<Void>() {
-                        @Override
-                        public void operationComplete(int rc, Void result) {
-                            synchronized (removedLedgers) {
-                                removedLedgers.notify();
-                            }
+                getLedgerManager().removeLedgerMetadata(ledgerId, Version.ANY, new GenericCallback<Void>() {
+                    @Override
+                    public void operationComplete(int rc, Void result) {
+                        synchronized (removedLedgers) {
+                            removedLedgers.notify();
                         }
-                   });
+                    }
+                });
                 removedLedgers.wait();
             }
             removedLedgers.add(ledgerId);
@@ -142,13 +150,14 @@ public class GcLedgersTest extends LedgerManagerTestCase {
         final CountDownLatch inGcProgress = new CountDownLatch(1);
         final CountDownLatch createLatch = new CountDownLatch(1);
         final CountDownLatch endLatch = new CountDownLatch(2);
-        final GarbageCollector garbageCollector =
-                new ScanAndCompareGarbageCollector(getLedgerManager(), activeLedgers);
+        final GarbageCollector garbageCollector = new ScanAndCompareGarbageCollector(getLedgerManager(),
+                new MockLedgerStorage());
         Thread gcThread = new Thread() {
             @Override
             public void run() {
                 garbageCollector.gc(new GarbageCollector.GarbageCleaner() {
                     boolean paused = false;
+
                     @Override
                     public void clean(long ledgerId) {
                         if (!paused) {
@@ -197,7 +206,7 @@ public class GcLedgersTest extends LedgerManagerTestCase {
         }
     }
 
-    @Test(timeout=60000)
+    @Test(timeout = 60000)
     public void testGcLedgersOutsideRange() throws Exception {
         final SortedSet<Long> createdLedgers = Collections.synchronizedSortedSet(new TreeSet<Long>());
         final Queue<Long> cleaned = new LinkedList<Long>();
@@ -205,15 +214,15 @@ public class GcLedgersTest extends LedgerManagerTestCase {
 
         createLedgers(numLedgers, createdLedgers);
 
-        final GarbageCollector garbageCollector =
-                new ScanAndCompareGarbageCollector(getLedgerManager(), activeLedgers);
+        final GarbageCollector garbageCollector = new ScanAndCompareGarbageCollector(getLedgerManager(),
+                new MockLedgerStorage());
         GarbageCollector.GarbageCleaner cleaner = new GarbageCollector.GarbageCleaner() {
-                @Override
-                public void clean(long ledgerId) {
-                    LOG.info("Cleaned {}", ledgerId);
-                    cleaned.add(ledgerId);
-                }
-            };
+            @Override
+            public void clean(long ledgerId) {
+                LOG.info("Cleaned {}", ledgerId);
+                cleaned.add(ledgerId);
+            }
+        };
 
         garbageCollector.gc(cleaner);
         assertNull("Should have cleaned nothing", cleaned.poll());
@@ -222,16 +231,16 @@ public class GcLedgersTest extends LedgerManagerTestCase {
         removeLedger(last);
         garbageCollector.gc(cleaner);
         assertNotNull("Should have cleaned something", cleaned.peek());
-        assertEquals("Should have cleaned last ledger" + last, (long)last, (long)cleaned.poll());
+        assertEquals("Should have cleaned last ledger" + last, (long) last, (long) cleaned.poll());
 
         long first = createdLedgers.first();
         removeLedger(first);
         garbageCollector.gc(cleaner);
         assertNotNull("Should have cleaned something", cleaned.peek());
-        assertEquals("Should have cleaned first ledger" + first, (long)first, (long)cleaned.poll());
+        assertEquals("Should have cleaned first ledger" + first, (long) first, (long) cleaned.poll());
     }
 
-    @Test(timeout=60000)
+    @Test(timeout = 60000)
     public void testGcLedgersNotLast() throws Exception {
         final SortedSet<Long> createdLedgers = Collections.synchronizedSortedSet(new TreeSet<Long>());
         final List<Long> cleaned = new ArrayList<Long>();
@@ -241,15 +250,15 @@ public class GcLedgersTest extends LedgerManagerTestCase {
 
         createLedgers(numLedgers, createdLedgers);
 
-        final GarbageCollector garbageCollector =
-                new ScanAndCompareGarbageCollector(getLedgerManager(), activeLedgers);
+        final GarbageCollector garbageCollector = new ScanAndCompareGarbageCollector(getLedgerManager(),
+                new MockLedgerStorage());
         GarbageCollector.GarbageCleaner cleaner = new GarbageCollector.GarbageCleaner() {
-                @Override
-                public void clean(long ledgerId) {
-                    LOG.info("Cleaned {}", ledgerId);
-                    cleaned.add(ledgerId);
-                }
-            };
+            @Override
+            public void clean(long ledgerId) {
+                LOG.info("Cleaned {}", ledgerId);
+                cleaned.add(ledgerId);
+            }
+        };
 
         SortedSet<Long> scannedLedgers = new TreeSet<Long>();
         LedgerRangeIterator iterator = getLedgerManager().getLedgerRanges();
@@ -267,6 +276,102 @@ public class GcLedgersTest extends LedgerManagerTestCase {
         removeLedger(first);
         garbageCollector.gc(cleaner);
         assertEquals("Should have cleaned something", 1, cleaned.size());
-        assertEquals("Should have cleaned first ledger" + first, (long)first, (long)cleaned.get(0));
+        assertEquals("Should have cleaned first ledger" + first, (long) first, (long) cleaned.get(0));
+    }
+
+    class MockLedgerStorage implements LedgerStorage {
+
+        @Override
+        public void initialize(ServerConfiguration conf, LedgerManager ledgerManager,
+                LedgerDirsManager ledgerDirsManager) throws IOException {
+
+        }
+
+        @Override
+        public void start() {
+        }
+
+        @Override
+        public void shutdown() throws InterruptedException {
+        }
+
+        @Override
+        public boolean ledgerExists(long ledgerId) throws IOException {
+            return false;
+        }
+
+        @Override
+        public boolean setFenced(long ledgerId) throws IOException {
+            return false;
+        }
+
+        @Override
+        public boolean isFenced(long ledgerId) throws IOException {
+            return false;
+        }
+
+        @Override
+        public void setMasterKey(long ledgerId, byte[] masterKey) throws IOException {
+        }
+
+        @Override
+        public byte[] readMasterKey(long ledgerId) throws IOException, BookieException {
+            return null;
+        }
+
+        @Override
+        public long addEntry(ByteBuffer entry) throws IOException {
+            return 0;
+        }
+
+        @Override
+        public ByteBuffer getEntry(long ledgerId, long entryId) throws IOException {
+            return null;
+        }
+
+        @Override
+        public boolean isFlushRequired() {
+            return false;
+        }
+
+        @Override
+        public void trimEntries(long ledgerId, long lastEntryId) throws IOException {
+        }
+
+        @Override
+        public void flush() throws IOException {
+        }
+
+        @Override
+        public void deleteLedger(long ledgerId) throws IOException {
+            activeLedgers.remove(ledgerId);
+        }
+
+        @Override
+        public void deleteAllLedgers() throws IOException {
+            for (long ledger : activeLedgers.snapshot().keySet()) {
+                activeLedgers.remove(ledger);
+            }
+        }
+
+        @Override
+        public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId) {
+            NavigableMap<Long, Boolean> bkActiveLedgersSnapshot = activeLedgers.snapshot();
+            Map<Long, Boolean> subBkActiveLedgers = bkActiveLedgersSnapshot
+                    .subMap(firstLedgerId, true, lastLedgerId, false);
+
+            return subBkActiveLedgers.keySet();
+        }
+
+        @Override
+        public void updateEntriesLocations(Iterable<EntryLocation> locations) throws IOException {
+
+        }
+
+        @Override
+        public BKMBeanInfo getJMXBean() {
+            return null;
+        }
+
     }
 }
