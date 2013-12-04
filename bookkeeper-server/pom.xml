@@ -38,6 +38,11 @@
       <version>2.4.1</version>
       <scope>compile</scope>
     </dependency>
+	<dependency>
+		<groupId>org.fusesource.leveldbjni</groupId>
+		<artifactId>leveldbjni-all</artifactId>
+		<version>1.7</version>
+	</dependency>
     <dependency>
       <groupId>com.google.guava</groupId>
       <artifactId>guava</artifactId>
@@ -242,6 +247,10 @@
                     <exec executable="protoc" failonerror="true">
                       <arg value="--java_out=src/test/java" />
                       <arg value="src/test/proto/TestDataFormats.proto" />
+                    </exec>
+                    <exec executable="protoc" failonerror="true">
+                      <arg value="--java_out=src/main/java" />
+                      <arg value="src/main/proto/DbLedgerStorageDataFormats.proto" />
                     </exec>
                   </target>
                 </configuration>
