@@ -44,6 +44,11 @@
       <scope>compile</scope>
     </dependency>
     <dependency>
+      <groupId>org.fusesource.leveldbjni</groupId>
+      <artifactId>leveldbjni-all</artifactId>
+      <version>1.8</version>
+    </dependency>
+    <dependency>
       <groupId>com.google.guava</groupId>
       <artifactId>guava</artifactId>
       <version>${guava.version}</version>
@@ -172,6 +177,11 @@
           <artifactId>bookkeeper-server</artifactId>
         </exclusion>
       </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>io.netty</groupId>
+      <artifactId>netty-all</artifactId>
+      <version>4.0.25.Final</version>
     </dependency>
   </dependencies>
   <build>
@@ -332,6 +342,10 @@
                     <exec executable="protoc" failonerror="true">
                       <arg value="--java_out=src/test/java" />
                       <arg value="src/test/proto/TestDataFormats.proto" />
+                    </exec>
+                    <exec executable="protoc" failonerror="true">
+                      <arg value="--java_out=src/main/java" />
+                      <arg value="src/main/proto/DbLedgerStorageDataFormats.proto" />
                     </exec>
                   </target>
                 </configuration>

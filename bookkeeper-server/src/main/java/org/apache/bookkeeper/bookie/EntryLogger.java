@@ -606,7 +606,7 @@ public class EntryLogger {
         leastUnflushedLogId = flushedLogId + 1;
     }
 
-    void flush() throws IOException {
+    public synchronized void flush() throws IOException {
         flushRotatedLogs();
         flushCurrentLog();
     }
@@ -622,7 +622,8 @@ public class EntryLogger {
         return addEntry(ledger, entry, true);
     }
 
-    synchronized long addEntry(long ledger, ByteBuffer entry, boolean rollLog) throws IOException {
+    public synchronized long addEntry(long ledger, ByteBuffer entry, boolean rollLog)
+            throws IOException {
         if (rollLog) {
             // Create new log if logSizeLimit reached or current disk is full
             boolean createNewLog = shouldCreateNewEntryLog.get();
@@ -652,7 +653,7 @@ public class EntryLogger {
         return logChannel.position() + size > logSizeLimit;
     }
 
-    byte[] readEntry(long ledgerId, long entryId, long location) throws IOException, Bookie.NoEntryException {
+    public byte[] readEntry(long ledgerId, long entryId, long location) throws IOException, Bookie.NoEntryException {
         long entryLogId = logIdForOffset(location);
         long pos = location & 0xffffffffL;
         ByteBuffer sizeBuff = ByteBuffer.allocate(4);
