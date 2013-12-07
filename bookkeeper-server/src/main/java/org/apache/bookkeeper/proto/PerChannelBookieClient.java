@@ -521,29 +521,31 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         executor.submitOrdered(key.ledgerId, new SafeRunnable() {
             @Override
             public void safeRun() {
+                final List<ReadCompletion> completions;
                 synchronized (readCompletions) {
-                    for (ReadCompletion readCompletion : readCompletions.get(key)) {
-                        String bAddress = "null";
-                        Channel c = channel;
+                    completions = readCompletions.removeAll(key);
+                }
 
-                        if (c != null) {
-                            bAddress = c.getRemoteAddress().toString();
-                        }
+                for (ReadCompletion readCompletion : completions) {
+                    String bAddress = "null";
+                    Channel c = channel;
 
-                        LOG.error("Could not write  request for reading entry: " + key.entryId + " ledger-id: "
-                                  + key.ledgerId + " bookie: " + bAddress);
+                    if (c != null) {
+                        bAddress = c.getRemoteAddress().toString();
+                    }
 
-                        if (readCompletion != null) {
-                            LOG.debug("Could not write request for reading entry: {}" + " ledger-id: {} bookie: {}",
-                                    new Object[] { key.entryId, key.ledgerId, bAddress });
+                    LOG.error("Could not write  request for reading entry: " + key.entryId + " ledger-id: "
+                              + key.ledgerId + " bookie: " + bAddress);
 
-                            readCompletion.cb.readEntryComplete(BKException.Code.BookieHandleNotAvailableException,
-                                    key.ledgerId, key.entryId, null, readCompletion.ctx);
-                        }
+                    if (readCompletion != null) {
+                        LOG.debug("Could not write request for reading entry: {}" + " ledger-id: {} bookie: {}",
+                                  new Object[] { key.entryId, key.ledgerId, bAddress });
+
+                    readCompletion.cb.readEntryComplete(BKException.Code.BookieHandleNotAvailableException,
+                                                        key.ledgerId, key.entryId, null, readCompletion.ctx);
                     }
                 }
             }
-
         });
     }
 
