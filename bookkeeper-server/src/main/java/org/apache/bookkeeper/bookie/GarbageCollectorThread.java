@@ -153,6 +153,7 @@ public class GarbageCollectorThread extends Thread {
                 throw new IOException("Interrupted waiting for flush", ie);
             }
 
+            ledgerStorage.updateEntriesLocations(offsets);
             offsets.clear();
         }
 
