@@ -56,6 +56,8 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.ParseException;
 
+import org.apache.bookkeeper.stats.NullStatsLogger;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -788,7 +790,7 @@ public class BookieShell implements Tool {
 
     private synchronized Journal getJournal() throws IOException {
         if (null == journal) {
-            journal = new Journal(bkConf, new LedgerDirsManager(bkConf));
+            journal = new Journal(bkConf, new LedgerDirsManager(bkConf), NullStatsLogger.INSTANCE);
         }
         return journal;
     }

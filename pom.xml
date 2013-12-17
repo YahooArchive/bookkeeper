@@ -37,6 +37,8 @@
     <module>hedwig-protocol</module>
     <module>bookkeeper-server</module>
     <module>bookkeeper-benchmark</module>
+    <module>bookkeeper-stats</module>
+    <module>bookkeeper-stats-providers/pom.xml</module>
   </modules>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
