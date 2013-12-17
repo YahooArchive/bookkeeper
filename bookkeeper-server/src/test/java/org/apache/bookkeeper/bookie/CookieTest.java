@@ -77,6 +77,7 @@ public class CookieTest {
     public void testCleanStart() throws Exception {
         ServerConfiguration conf = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setJournalDirName(newDirectory(false))
             .setLedgerDirNames(new String[] { newDirectory(false) })
             .setBookiePort(bookiePort);
@@ -96,6 +97,7 @@ public class CookieTest {
     public void testBadJournalCookie() throws Exception {
         ServerConfiguration conf1 = new ServerConfiguration()
             .setJournalDirName(newDirectory())
+            .setAllowLoopback(true)
             .setLedgerDirNames(new String[] { newDirectory() })
             .setBookiePort(bookiePort);
         Cookie c = Cookie.generateCookie(conf1);
@@ -105,6 +107,7 @@ public class CookieTest {
         String ledgerDir = newDirectory();
         ServerConfiguration conf2 = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setJournalDirName(journalDir)
             .setLedgerDirNames(new String[] { ledgerDir })
             .setBookiePort(bookiePort);
@@ -132,6 +135,7 @@ public class CookieTest {
         String journalDir = newDirectory();
         ServerConfiguration conf = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setJournalDirName(journalDir)
             .setLedgerDirNames(ledgerDirs)
             .setBookiePort(bookiePort);
@@ -173,6 +177,7 @@ public class CookieTest {
         String journalDir = newDirectory();
         ServerConfiguration conf = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setJournalDirName(journalDir)
             .setLedgerDirNames(new String[] { ledgerDir0 })
             .setBookiePort(bookiePort);
@@ -205,6 +210,7 @@ public class CookieTest {
         String journalDir = newDirectory();
         ServerConfiguration conf = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setJournalDirName(journalDir)
             .setLedgerDirNames(new String[] { ledgerDir0 , newDirectory() })
             .setBookiePort(bookiePort);
@@ -230,6 +236,7 @@ public class CookieTest {
     public void testBookiePortChanged() throws Exception {
         ServerConfiguration conf = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setJournalDirName(newDirectory())
             .setLedgerDirNames(new String[] { newDirectory() , newDirectory() })
             .setBookiePort(bookiePort);
@@ -256,6 +263,7 @@ public class CookieTest {
     public void testNewBookieStartingWithAnotherBookiesPort() throws Exception {
         ServerConfiguration conf = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setJournalDirName(newDirectory())
             .setLedgerDirNames(new String[] { newDirectory() , newDirectory() })
             .setBookiePort(bookiePort);
@@ -265,6 +273,7 @@ public class CookieTest {
 
         conf = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setJournalDirName(newDirectory())
             .setLedgerDirNames(new String[] { newDirectory() , newDirectory() })
             .setBookiePort(bookiePort);
@@ -290,6 +299,7 @@ public class CookieTest {
 
         ServerConfiguration bookieConf = new ServerConfiguration()
                 .setZkServers(zkutil.getZooKeeperConnectString())
+                .setAllowLoopback(true)
                 .setJournalDirName(newDirectory(false))
                 .setLedgerDirNames(new String[] { newDirectory(false) })
                 .setBookiePort(bookiePort);
@@ -321,6 +331,7 @@ public class CookieTest {
     public void testV2data() throws Exception {
         ServerConfiguration conf = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setJournalDirName(newV2JournalDirectory())
             .setLedgerDirNames(new String[] { newV2LedgerDirectory() })
             .setBookiePort(bookiePort);
@@ -341,6 +352,7 @@ public class CookieTest {
     public void testV1data() throws Exception {
         ServerConfiguration conf = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setJournalDirName(newV1JournalDirectory())
             .setLedgerDirNames(new String[] { newV1LedgerDirectory() })
             .setBookiePort(bookiePort);

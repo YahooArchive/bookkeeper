@@ -72,6 +72,7 @@ public class ConcurrentLedgerTest extends TestCase {
         ledgerDir.mkdirs();
 
         conf.setBookiePort(5000);
+        conf.setAllowLoopback(true);
         conf.setZkServers(null);
         conf.setJournalDirName(txnDir.getPath());
         conf.setLedgerDirNames(new String[] { ledgerDir.getPath() });

@@ -57,6 +57,7 @@ public class EntryLogTest extends TestCase {
         int gcWaitTime = 1000;
         ServerConfiguration conf = new ServerConfiguration();
         conf.setGcWaitTime(gcWaitTime);
+        conf.setAllowLoopback(true);
         conf.setLedgerDirNames(new String[] {tmpDir.toString()});
         Bookie bookie = new Bookie(conf);
         // create some entries
@@ -107,7 +108,7 @@ public class EntryLogTest extends TestCase {
         Bookie.checkDirectoryStructure(curDir);
 
         ServerConfiguration conf = new ServerConfiguration();
-        conf.setLedgerDirNames(new String[] {tmpDir.toString()});
+        conf.setLedgerDirNames(new String[] {tmpDir.toString()}).setAllowLoopback(true);
         Bookie bookie = new Bookie(conf);
         // create some entries
         int numLogs = 3;
@@ -168,7 +169,7 @@ public class EntryLogTest extends TestCase {
         File tmpDir = File.createTempFile("bkTest", ".dir");
         tmpDir.delete();
         ServerConfiguration conf = new ServerConfiguration();
-        conf.setLedgerDirNames(new String[] { tmpDir.toString() });
+        conf.setLedgerDirNames(new String[] { tmpDir.toString() }).setAllowLoopback(true);
         EntryLogger entryLogger = null;
         try {
             entryLogger = new EntryLogger(conf, new LedgerDirsManager(conf));
@@ -194,7 +195,7 @@ public class EntryLogTest extends TestCase {
         ledgerDir2.delete();
         ServerConfiguration conf = new ServerConfiguration();
         conf.setLedgerDirNames(new String[] { ledgerDir1.getAbsolutePath(),
-                ledgerDir2.getAbsolutePath() });
+                ledgerDir2.getAbsolutePath() }).setAllowLoopback(true);
         Bookie bookie = new Bookie(conf);
         EntryLogger entryLogger = new EntryLogger(conf,
                 bookie.getLedgerDirsManager());

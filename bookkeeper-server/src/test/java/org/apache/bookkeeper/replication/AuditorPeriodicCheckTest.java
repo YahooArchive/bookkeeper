@@ -71,6 +71,7 @@ public class AuditorPeriodicCheckTest extends BookKeeperClusterTestCase {
     public AuditorPeriodicCheckTest() {
         super(3);
         baseConf.setPageLimit(1); // to make it easy to push ledger out of cache
+        baseConf.setAllowLoopback(true);
     }
 
     @Before
@@ -80,6 +81,7 @@ public class AuditorPeriodicCheckTest extends BookKeeperClusterTestCase {
 
         for (int i = 0; i < numBookies; i++) {
             ServerConfiguration conf = new ServerConfiguration(bsConfs.get(i));
+            conf.setAllowLoopback(true);
             conf.setAuditorPeriodicCheckInterval(CHECK_INTERVAL);
 
             String addr = StringUtils.addrToString(bs.get(i).getLocalAddress());
@@ -144,7 +146,10 @@ public class AuditorPeriodicCheckTest extends BookKeeperClusterTestCase {
             out.getChannel().write(junk);
             out.close();
         }
-        restartBookies(); // restart to clear read buffers
+
+        ServerConfiguration newConf = new ServerConfiguration();
+        newConf.setAllowLoopback(true);
+        restartBookies(newConf); // restart to clear read buffers
 
         underReplicationManager.enableLedgerReplication();
         long underReplicatedLedger = -1;
@@ -228,6 +233,7 @@ public class AuditorPeriodicCheckTest extends BookKeeperClusterTestCase {
 
         final AtomicInteger numReads = new AtomicInteger(0);
         ServerConfiguration conf = killBookie(0);
+        conf.setAllowLoopback(true);
 
         Bookie deadBookie = new Bookie(conf) {
             @Override
@@ -292,9 +298,12 @@ public class AuditorPeriodicCheckTest extends BookKeeperClusterTestCase {
             }
             lh.close();
         }
+
+        ServerConfiguration conf = bsConfs.get(0);
+        conf.setAllowLoopback(true);
         final Auditor auditor = new Auditor(
-                StringUtils.addrToString(Bookie.getBookieAddress(bsConfs.get(0))),
-                bsConfs.get(0), zkc);
+                StringUtils.addrToString(Bookie.getBookieAddress(conf)),
+                conf, zkc);
         final AtomicBoolean exceptionCaught = new AtomicBoolean(false);
         final CountDownLatch latch = new CountDownLatch(1);
         Thread t = new Thread() {

@@ -66,6 +66,7 @@ public class BookieClientTest extends TestCase {
         // for the zkServers input parameter when constructing the BookieServer.
         ServerConfiguration conf = new ServerConfiguration();
         conf.setZkServers(null).setBookiePort(port)
+            .setAllowLoopback(true)
             .setJournalDirName(tmpDir.getPath())
             .setLedgerDirNames(new String[] { tmpDir.getPath() });
         bs = new BookieServer(conf);

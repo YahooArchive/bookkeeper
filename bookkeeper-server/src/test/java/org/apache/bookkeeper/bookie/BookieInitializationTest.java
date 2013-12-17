@@ -98,6 +98,7 @@ public class BookieInitializationTest {
 
         final ServerConfiguration conf = new ServerConfiguration()
                 .setZkServers(null).setJournalDirName(tmpDir.getPath())
+                .setAllowLoopback(true)
                 .setLedgerDirNames(new String[] { tmpDir.getPath() });
 
         // simulating ZooKeeper exception by assigning a closed zk client to bk
@@ -131,6 +132,7 @@ public class BookieInitializationTest {
 
         final ServerConfiguration conf = new ServerConfiguration()
                 .setZkServers(null).setJournalDirName(tmpDir.getPath())
+                .setAllowLoopback(true)
                 .setLedgerDirNames(new String[] { tmpDir.getPath() });
 
         final String bkRegPath = conf.getZkAvailableBookiesPath() + "/"
@@ -196,6 +198,7 @@ public class BookieInitializationTest {
         tmpDir.mkdir();
 
         ServerConfiguration conf = new ServerConfiguration().setZkServers(null)
+                .setAllowLoopback(true)
                 .setJournalDirName(tmpDir.getPath()).setLedgerDirNames(
                         new String[] { tmpDir.getPath() });
 
@@ -254,7 +257,8 @@ public class BookieInitializationTest {
         int port = 12555;
         conf.setZkServers(null).setBookiePort(port).setJournalDirName(
                 tmpDir.getPath()).setLedgerDirNames(
-                new String[] { tmpDir.getPath() });
+                new String[] { tmpDir.getPath() })
+                .setAllowLoopback(true);
         BookieServer bs1 = new BookieServer(conf);
         bs1.start();
 
@@ -282,6 +286,7 @@ public class BookieInitializationTest {
 
         final ServerConfiguration conf = new ServerConfiguration()
                 .setZkServers(zkutil.getZooKeeperConnectString())
+                .setAllowLoopback(true)
                 .setZkTimeout(5000).setJournalDirName(tmpDir.getPath())
                 .setLedgerDirNames(new String[] { tmpDir.getPath() });
         try {
@@ -307,6 +312,7 @@ public class BookieInitializationTest {
 
         final ServerConfiguration conf = new ServerConfiguration()
             .setZkServers(zkutil.getZooKeeperConnectString())
+            .setAllowLoopback(true)
             .setZkTimeout(5000).setJournalDirName(tmpDir.getPath())
             .setLedgerDirNames(new String[] { tmpDir.getPath() });
         conf.setZkLedgersRootPath(ZK_ROOT);
