@@ -137,7 +137,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
                         addr, rc);
                 // closing the set state to disconnected
                 // and complete the pending ops
-                channel.close().awaitUninterruptibly();
+                closeChannel(channel);
             }
 
             // trick to not do operations under the lock, take the list
@@ -158,16 +158,28 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
 
         synchronized (PerChannelBookieClient.this) {
             if (future.isSuccess() && state == ConnectionState.CONNECTING) {
-                LOG.info("Successfully connected to bookie: " + addr);
+                LOG.info("Successfully connected to bookie: {}", future.getChannel());
                 channel = future.getChannel();
                 state = ConnectionState.AUTHENTICATING;
                 authStartTime = MathUtils.now();
             } else if (future.isSuccess() && (state == ConnectionState.CLOSED || state == ConnectionState.DISCONNECTED)) {
                 LOG.error("Closed before connection completed, clean up: " + addr);
-                future.getChannel().close();
+                LOG.warn("Closed before connection completed, clean up: {}, current state {}",
+                         future.getChannel(), state);
+                closeChannel(future.getChannel());
+
                 channel = null;
+            } else if (future.isSuccess() && (state == ConnectionState.CONNECTED
+                                              || state == ConnectionState.AUTHENTICATING)) {
+                LOG.debug("Already connected with another channel({}), so close the new channel({})",
+                          channel, future.getChannel());
+                closeChannel(future.getChannel());
+                return; // pendingOps should have been completed when other channel connected
             } else {
-                LOG.error("Could not connect to bookie: " + addr);
+                LOG.error("Could not connect to bookie: {}, current state {}",
+                          future.getChannel(), state);
+                closeChannel(future.getChannel());
+
                 channel = null;
                 if (state != ConnectionState.CLOSED) {
                     state = ConnectionState.DISCONNECTED;
@@ -543,14 +555,15 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
             public void safeRun() {
                 synchronized (readCompletions) {
                     for (ReadCompletion readCompletion : readCompletions.get(key)) {
-                        LOG.error("Could not write  request for reading entry: " + key.entryId + " ledger-id: "
-                                + key.ledgerId + " bookie: " + channel.getRemoteAddress());
-
                         String bAddress = "null";
                         Channel c = channel;
+
                         if (c != null) {
                             bAddress = c.getRemoteAddress().toString();
                         }
+
+                        LOG.error("Could not write  request for reading entry: " + key.entryId + " ledger-id: "
+                                  + key.ledgerId + " bookie: " + bAddress);
 
                         if (readCompletion != null) {
                             LOG.debug("Could not write request for reading entry: {}" + " ledger-id: {} bookie: {}",
