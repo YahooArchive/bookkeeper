@@ -80,6 +80,7 @@ public class ScanAndCompareGarbageCollector implements GarbageCollector{
                           ledgersInMetadata, subBkActiveLedgers);
                 for (Long bkLid : subBkActiveLedgers) {
                     if (!ledgersInMetadata.contains(bkLid)) {
+                        ledgerStorage.deleteLedger(bkLid);
                         garbageCleaner.clean(bkLid);
                     }
                 }
