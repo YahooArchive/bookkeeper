@@ -20,7 +20,6 @@ package org.apache.bookkeeper.conf;
 import java.io.File;
 import java.util.List;
 
-import org.apache.bookkeeper.bookie.InterleavedLedgerStorage;
 import org.apache.commons.lang.StringUtils;
 
 /**
@@ -72,8 +71,6 @@ public class ServerConfiguration extends AbstractConfiguration {
     protected final static String DISK_CHECK_INTERVAL = "diskCheckInterval";
     protected final static String AUDITOR_PERIODIC_CHECK_INTERVAL = "auditorPeriodicCheckInterval";
     protected final static String AUTO_RECOVERY_DAEMON_ENABLED = "autoRecoveryDaemonEnabled";
-
-    protected final static String LEDGER_STORAGE_CLASS = "ledgerStorageClass";
 
     // Bookie auth provider factory class name
     protected final static String BOOKIE_AUTH_PROVIDER_FACTORY_CLASS
@@ -815,26 +812,6 @@ public class ServerConfiguration extends AbstractConfiguration {
      */
     public ServerConfiguration setCompactionRate(int rate) {
         setProperty(COMPACTION_RATE, rate);
-        return this;
-    }
-
-    /**
-     * Get the {@link LedgerStorage} implementation class name
-     * 
-     * @return the class name
-     */
-    public String getLedgerStorageClass() {
-        return getString(LEDGER_STORAGE_CLASS, InterleavedLedgerStorage.class.getName());
-    }
-
-    /**
-     * Set the {@link LedgerStorage} implementation class name
-     * 
-     * @param ledgerStorageClass the class name
-     * @return ServerConfiguration
-     */
-    public ServerConfiguration setLedgerStorageClass(String ledgerStorageClass) {
-        setProperty(LEDGER_STORAGE_CLASS, ledgerStorageClass);
         return this;
     }
 

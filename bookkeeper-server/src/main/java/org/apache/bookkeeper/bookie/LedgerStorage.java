@@ -24,25 +24,13 @@ package org.apache.bookkeeper.bookie;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.jmx.BKMBeanInfo;
-import org.apache.bookkeeper.meta.LedgerManager;
 
 /**
  * Interface for storing ledger data
  * on persistant storage.
  */
-public interface LedgerStorage {
-
-    /**
-     * Initialize the LedgerStorage implementation
-     * 
-     * @param conf
-     * @param ledgerManager
-     * @param ledgerDirsManager
-     */
-    void initialize(ServerConfiguration conf, LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager) throws IOException;
-
+interface LedgerStorage {
     /**
      * Start any background threads
      * belonging to the storage system. For example,
@@ -115,49 +103,7 @@ public interface LedgerStorage {
     void flush() throws IOException;
 
     /**
-     * 
-     * @param ledgerId
-     * @throws IOException
-     */
-    void deleteLedger(long ledgerId) throws IOException;
-
-    /**
-     * Delete all the ledgers from the storage
-     * @throws IOException
-     */
-    void deleteAllLedgers() throws IOException;
-
-    /**
-     * Get an iterator over a range of ledger ids stored in the bookie.
-     * 
-     * @param firstLedgerId first ledger id in the sequence (included)
-     * @param lastLedgerId last ledger id in the sequence (not included)
-     * @return
-     */
-    Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId);
-
-    /**
-     * Update the location of several entries and sync the underlying storage
-     * 
-     * @param locations the list of locations to update
-     * @throws IOException
-     */
-    void updateEntriesLocations(Iterable<EntryLocation> locations) throws IOException;
-
-    /**
      * Get the JMX management bean for this LedgerStorage
      */
     BKMBeanInfo getJMXBean();
-
-    public static class EntryLocation {
-        public final long ledger;
-        public final long entry;
-        public final long location;
-
-        public EntryLocation(long ledger, long entry, long location) {
-            this.ledger = ledger;
-            this.entry = entry;
-            this.location = location;
-        }
-    }
 }
