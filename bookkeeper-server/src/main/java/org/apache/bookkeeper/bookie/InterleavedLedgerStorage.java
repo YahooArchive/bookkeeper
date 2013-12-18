@@ -144,12 +144,6 @@ public class InterleavedLedgerStorage implements LedgerStorage {
         }
         return ByteBuffer.wrap(entryLogger.readEntry(ledgerId, entryId, offset));
     }
-    
-    @Override
-    public void trimEntries(long ledgerId, long lastEntryId) throws IOException {
-        // Ignore trimming request
-        LOG.debug("TrimEntries: {}@{}", ledgerId, lastEntryId);
-    }
 
     @Override
     public boolean isFlushRequired() {

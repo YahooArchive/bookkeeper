@@ -1114,13 +1114,6 @@ public class Bookie extends Thread {
         return handle.readEntry(entryId);
     }
 
-    public void trim(long ledgerId, long lastEntryId)
-            throws IOException, NoLedgerException {
-        LedgerDescriptor handle = handles.getReadOnlyHandle(ledgerId);
-        LOG.trace("Trim {}@{}", lastEntryId, ledgerId);
-        handle.trim(lastEntryId);
-    }
-
     // The rest of the code is test stuff
     static class CounterCallback implements WriteCallback {
         int count;

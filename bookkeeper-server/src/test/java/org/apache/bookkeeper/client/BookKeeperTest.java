@@ -268,13 +268,4 @@ public class BookKeeperTest extends BaseTestCase {
 
         latch.await();
     }
-
-    @Test(timeout=60000)
-    public void testTrimLedger() throws Exception {
-        LedgerHandle lh = bkc.createLedger(3, 3, DigestType.CRC32, "testPasswd".getBytes());
-        long entryId = lh.addEntry("test".getBytes());
-        lh.asyncTrim(entryId);
-        lh.close();
-        bkc.close();
-    }
 }

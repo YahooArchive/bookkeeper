@@ -84,9 +84,4 @@ public class LedgerDescriptorImpl extends LedgerDescriptor {
     ByteBuffer readEntry(long entryId) throws IOException {
         return ledgerStorage.getEntry(ledgerId, entryId);
     }
-
-    @Override
-    void trim(long lastEntryId) throws IOException {
-        ledgerStorage.trimEntries(ledgerId, lastEntryId);
-    }
 }
