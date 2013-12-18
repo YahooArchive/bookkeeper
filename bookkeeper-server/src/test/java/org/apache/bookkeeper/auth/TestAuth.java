@@ -73,7 +73,8 @@ public class TestAuth extends BookKeeperClusterTestCase {
         clientConf.setClientAuthProviderFactoryClass(
                 SendUntilCompleteClientAuthProviderFactory.class.getName());
         
-        startBookie(bookieConf);
+        bsConfs.add(bookieConf);
+        bs.add(startBookie(bookieConf));
         connectAndWriteToBookie(clientConf); // should succeed
     }
     
@@ -90,8 +91,9 @@ public class TestAuth extends BookKeeperClusterTestCase {
         ClientConfiguration clientConf = newClientConfiguration();
         clientConf.setClientAuthProviderFactoryClass(
                 SendUntilCompleteClientAuthProviderFactory.class.getName());
-        
-        startBookie(bookieConf);
+
+        bsConfs.add(bookieConf);
+        bs.add(startBookie(bookieConf));
         try {
             connectAndWriteToBookie(clientConf); // should fail
             fail("Shouldn't get this far");
@@ -114,8 +116,9 @@ public class TestAuth extends BookKeeperClusterTestCase {
         ClientConfiguration clientConf = newClientConfiguration();
         clientConf.setClientAuthProviderFactoryClass(
                 SendUntilCompleteClientAuthProviderFactory.class.getName());
-        
-        startBookie(bookieConf);
+
+        bsConfs.add(bookieConf);
+        bs.add(startBookie(bookieConf));
         connectAndWriteToBookie(clientConf); // should succeed
     }
     
@@ -132,8 +135,9 @@ public class TestAuth extends BookKeeperClusterTestCase {
         ClientConfiguration clientConf = newClientConfiguration();
         clientConf.setClientAuthProviderFactoryClass(
                 SendUntilCompleteClientAuthProviderFactory.class.getName());
-        
-        startBookie(bookieConf);
+
+        bsConfs.add(bookieConf);
+        bs.add(startBookie(bookieConf));
         try {
             connectAndWriteToBookie(clientConf); // should fail
             fail("Shouldn't get this far");
@@ -156,8 +160,9 @@ public class TestAuth extends BookKeeperClusterTestCase {
         ClientConfiguration clientConf = newClientConfiguration();
         clientConf.setClientAuthProviderFactoryClass(
                 SendUntilCompleteClientAuthProviderFactory.class.getName());
-        
-        startBookie(bookieConf);
+
+        bsConfs.add(bookieConf);
+        bs.add(startBookie(bookieConf));
         try {
             connectAndWriteToBookie(clientConf); // should fail
             fail("Shouldn't get this far");
@@ -181,7 +186,8 @@ public class TestAuth extends BookKeeperClusterTestCase {
         clientConf.setClientAuthProviderFactoryClass(
                 "java.lang.String");
         try {
-            startBookie(bookieConf);
+            bsConfs.add(bookieConf);
+            bs.add(startBookie(bookieConf));
             fail("Shouldn't get this far");
         } catch (RuntimeException e) {
             // received correct exception
@@ -216,7 +222,8 @@ public class TestAuth extends BookKeeperClusterTestCase {
         clientConf.setClientAuthProviderFactoryClass(
                 "NonExistantClassNameForTestingAuthPlugins");
         try {
-            startBookie(bookieConf);
+            bsConfs.add(bookieConf);
+            bs.add(startBookie(bookieConf));
             fail("Shouldn't get this far");
         } catch (RuntimeException e) {
             // received correct exception
@@ -248,7 +255,9 @@ public class TestAuth extends BookKeeperClusterTestCase {
         clientConf.setClientAuthProviderFactoryClass(
                 SendUntilCompleteClientAuthProviderFactory.class.getName())
             .setAuthTimeout(1000);
-        startBookie(bookieConf);
+
+        bsConfs.add(bookieConf);
+        bs.add(startBookie(bookieConf));
 
         try {
             connectAndWriteToBookie(clientConf);
@@ -273,7 +282,9 @@ public class TestAuth extends BookKeeperClusterTestCase {
         clientConf.setClientAuthProviderFactoryClass(
                 SendUntilCompleteClientAuthProviderFactory.class.getName())
             .setAuthTimeout(1000);
-        startBookie(bookieConf);
+
+        bsConfs.add(bookieConf);
+        bs.add(startBookie(bookieConf));
 
         try {
             connectAndWriteToBookie(clientConf);

@@ -369,13 +369,13 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
         Thread.sleep(1000);
         // restart them to ensure we can't
 
-        List<ServerConfiguration> bsConfsCopy = new ArrayList<ServerConfiguration>(bsConfs);
-        bsConfs.clear();
-        for (ServerConfiguration conf : bsConfsCopy) {
+        int j = 0;
+        for (ServerConfiguration conf : bsConfs) {
             if (null != newConf) {
                 conf.loadConf(newConf);
             }
-            startBookie(conf);
+            bs.add(startBookie(conf));
+            j++;
         }
     }
 
@@ -391,7 +391,8 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
     public int startNewBookie()
             throws Exception {
         ServerConfiguration conf = newServerConfiguration();
-        startBookie(conf);
+        bsConfs.add(conf);
+        bs.add(startBookie(conf));
 
         return conf.getBookiePort();
     }
@@ -407,8 +408,6 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
     protected BookieServer startBookie(ServerConfiguration conf)
             throws Exception {
         BookieServer server = new BookieServer(conf);
-        bsConfs.add(conf);
-        bs.add(server);
 
         server.start();
 

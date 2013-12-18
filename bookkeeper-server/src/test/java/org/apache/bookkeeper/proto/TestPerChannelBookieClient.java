@@ -206,10 +206,12 @@ public class TestPerChannelBookieClient extends BookKeeperClusterTestCase {
                             state = client.state;
                             channel = client.channel;
 
-                            if ((state == ConnectionState.CONNECTED
+                            if (((state == ConnectionState.CONNECTED
+                                  || state == ConnectionState.AUTHENTICATING)
                                  && (channel == null
                                      || !channel.isConnected()))
-                                || (state != ConnectionState.CONNECTED
+                                    || ((state != ConnectionState.CONNECTED
+                                         && state != ConnectionState.AUTHENTICATING)
                                     && channel != null
                                     && channel.isConnected())) {
                                 LOG.error("State({}) and channel({}) inconsistent " + channel,
