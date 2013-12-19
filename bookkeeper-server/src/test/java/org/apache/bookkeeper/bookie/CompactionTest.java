@@ -386,8 +386,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         File log0 = new File(curDir, "0.log");
         LedgerDirsManager dirs = new LedgerDirsManager(conf);
         assertFalse("Log shouldnt exist", log0.exists());
-        InterleavedLedgerStorage storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs);
+        InterleavedLedgerStorage storage = new InterleavedLedgerStorage(conf, manager, dirs);
         ledgers.add(1l);
         ledgers.add(2l);
         ledgers.add(3l);
@@ -405,8 +404,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         ledgers.remove(2l);
         ledgers.remove(3l);
 
-        storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs);
+        storage = new InterleavedLedgerStorage(conf, manager, dirs);
         storage.start();
         for (int i = 0; i < 10; i++) {
             if (!log0.exists()) {
@@ -421,8 +419,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         storage.setMasterKey(4, KEY);
         storage.addEntry(genEntry(4, 1, ENTRY_SIZE)); // force ledger 1 page to flush
 
-        storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs);
+        storage = new InterleavedLedgerStorage(conf, manager, dirs);
         storage.getEntry(1, 1); // entry should exist
     }
 

@@ -150,30 +150,6 @@ public class BookieClient {
         });
     }
 
-    public void trim(final InetSocketAddress addr, final long ledgerId, final byte[] masterKey, final long lastEntryId,
-            final int options) {
-        final PerChannelBookieClient client = lookupClient(addr);
-        if (client == null) {
-            LOG.warn("Bookie handle not available when sending trim request");
-            return;
-        }
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Sending trim request {}@{} to bookie: {}", new Object[] {lastEntryId, ledgerId, addr});
-        }
-
-        client.connectIfNeededAndDoOp(new GenericCallback<Void>() {
-            @Override
-            public void operationComplete(final int rc, Void result) {
-                if (rc == BKException.Code.OK) {
-                    client.trim(ledgerId, masterKey, lastEntryId, options);
-                } else {
-                    LOG.warn("Failed to connect to bookie {} rc: ", addr, BKException.getMessage(rc));
-                }
-            }
-        });
-    }
-
     public void readEntryAndFenceLedger(final InetSocketAddress addr,
                                         final long ledgerId,
                                         final byte[] masterKey,

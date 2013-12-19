@@ -99,23 +99,6 @@ public interface AsyncCallback {
                           Object ctx);
     }
 
-    public interface TrimCallback {
-        /**
-         * Callback declaration
-         *
-         * @param rc
-         *          return code
-         * @param lh
-         *          ledger handle
-         * @param lastEntryId
-         *          last entry id
-         * @param ctx
-         *          context object
-         */
-
-        void trimComplete(int rc, LedgerHandle lh, long lastEntryId, Object ctx);
-    }
-
     public interface DeleteCallback {
         /**
          * Callback definition for delete operations

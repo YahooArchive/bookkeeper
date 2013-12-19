@@ -452,7 +452,6 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
             entryId = bb.getLong();
             break;
         case BookieProtocol.READENTRY:
-        case BookieProtocol.TRIM:
             ledgerId = packet.getLong();
             entryId = packet.getLong();
             break;
@@ -624,18 +623,6 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
             }
             src.sendResponse(rsp);
             break;
-
-        case BookieProtocol.TRIM:
-            statType = BKStats.STATS_TRIM;
-            success = true;
-            
-            try {
-                bookie.trim(ledgerId, entryId);
-            } catch (Exception e) {
-                success = false;
-            }
-            break;
-
         default:
             src.sendResponse(buildResponse(BookieProtocol.EBADREQ, h.getVersion(), h.getOpCode(), ledgerId, entryId));
         }
