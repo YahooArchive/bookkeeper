@@ -25,7 +25,9 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.Formatter;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.SortedMap;
 
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.bookkeeper.meta.LedgerManagerFactory;
@@ -35,6 +37,7 @@ import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
 import org.apache.bookkeeper.bookie.EntryLogger.EntryLogScanner;
 import org.apache.bookkeeper.bookie.Journal.JournalScanner;
 import org.apache.bookkeeper.bookie.Journal.LastLogMark;
+import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorage;
 import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.BookKeeperAdmin;
 import org.apache.bookkeeper.conf.ClientConfiguration;
@@ -56,6 +59,8 @@ import org.apache.commons.cli.ParseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.Maps;
+
 /**
  * Bookie Shell is to provide utilities for users to administer a bookkeeper cluster.
  */
@@ -73,6 +78,7 @@ public class BookieShell implements Tool {
     static final String CMD_READJOURNAL = "readjournal";
     static final String CMD_LASTMARK = "lastmark";
     static final String CMD_AUTORECOVERY = "autorecovery";
+    static final String CMD_UPGRADE_DB_STORAGE= "upgrade-db-storage";
     static final String CMD_HELP = "help";
 
     final ServerConfiguration bkConf = new ServerConfiguration();
@@ -572,6 +578,65 @@ public class BookieShell implements Tool {
         }
     }
 
+    /**
+     * Upgrade bookie indexes from InterleavedStorage to DbLedgerStorage format
+     */
+    class UpgradeDbStorageCmd extends MyCommand {
+        Options opts = new Options();
+
+        public UpgradeDbStorageCmd() {
+            super(CMD_UPGRADE_DB_STORAGE);
+        }
+
+        @Override
+        Options getOptions() {
+            return opts;
+        }
+
+        @Override
+        String getDescription() {
+            return "Upgrade bookie indexes from InterleavedStorage to DbLedgerStorage format";
+        }
+
+        @Override
+        String getUsage() {
+            return "upgrade-db-storage";
+        }
+
+        @Override
+        int runCmd(CommandLine cmdLine) throws Exception {
+            LOG.info("=== Upgrading to DbLedgerStorage ===");
+            ServerConfiguration conf = new ServerConfiguration(bkConf);
+            LedgerDirsManager ledgerDirsManager = new LedgerDirsManager(conf);
+
+            InterleavedLedgerStorage interleavedStorage = new InterleavedLedgerStorage();
+            DbLedgerStorage dbStorage = new DbLedgerStorage();
+
+            interleavedStorage.initialize(conf, null, ledgerDirsManager);
+            dbStorage.initialize(conf, null, ledgerDirsManager);
+
+            for (long ledgerId : interleavedStorage.getActiveLedgersInRange(0, Long.MAX_VALUE)) {
+                LOG.info("Converting ledger {}", ledgerId);
+
+                FileInfo fi = getFileInfo(ledgerId);
+
+                Iterable<SortedMap<Long, Long>> entries = getLedgerIndexEntries(ledgerId);
+
+                long numberOfEntries = dbStorage.addLedgerToIndex(ledgerId, fi.isFenced(), fi.getMasterKey(), entries);
+                LOG.info("   -- done. fenced={} entries={}", fi.isFenced(), numberOfEntries);
+
+                // Remove index from old storage
+                interleavedStorage.deleteLedger(ledgerId);
+            }
+
+            dbStorage.shutdown();
+            interleavedStorage.shutdown();
+
+            LOG.info("---- Done Converting ----");
+            return 0;
+        }
+    }
+
     final Map<String, Command> commands;
     {
         commands = new HashMap<String, Command>();
@@ -583,6 +648,7 @@ public class BookieShell implements Tool {
         commands.put(CMD_READJOURNAL, new ReadJournalCmd());
         commands.put(CMD_LASTMARK, new LastMarkCmd());
         commands.put(CMD_AUTORECOVERY, new AutoRecoveryCmd());
+        commands.put(CMD_UPGRADE_DB_STORAGE, new UpgradeDbStorageCmd());
         commands.put(CMD_HELP, new HelpCmd());
     }
 
@@ -607,6 +673,7 @@ public class BookieShell implements Tool {
         System.err.println("       readlog      [-msg] <entry_log_id|entry_log_file_name>");
         System.err.println("       readjournal  [-msg] <journal_id|journal_file_name>");
         System.err.println("       autorecovery [-enable|-disable]");
+        System.err.println("       upgrade-db-storage");
         System.err.println("       lastmark");
         System.err.println("       help");
     }
@@ -812,6 +879,67 @@ public class BookieShell implements Tool {
                                  + ", the index file may be corrupted or last index page is not fully flushed yet : " + ie.getMessage());
             }
         }
+    }
+
+    /**
+     * Get an iterable over pages of entries and locations for a ledger
+     * 
+     * @param ledgerId
+     * @return
+     * @throws IOException
+     */
+    protected Iterable<SortedMap<Long, Long>> getLedgerIndexEntries(final long ledgerId) throws IOException {
+        final FileInfo fi = getFileInfo(ledgerId);
+        final long size = fi.size();
+
+        final LedgerEntryPage lep = new LedgerEntryPage(pageSize, entriesPerPage);
+        lep.usePage();
+
+        final Iterator<SortedMap<Long, Long>> iterator = new Iterator<SortedMap<Long, Long>>() {
+            long curSize = 0;
+            long curEntry = 0;
+
+            @Override
+            public boolean hasNext() {
+                return curSize < size;
+            }
+
+            @Override
+            public SortedMap<Long, Long> next() {
+                SortedMap<Long, Long> entries = Maps.newTreeMap();
+                lep.setLedger(ledgerId);
+                lep.setFirstEntry(curEntry);
+                try {
+                    lep.readPage(fi);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+
+                // process a page
+                for (int i = 0; i < entriesPerPage; i++) {
+                    long offset = lep.getOffset(i * 8);
+                    if (offset != 0) {
+                        entries.put(curEntry, offset);
+                    }
+                    ++curEntry;
+                }
+
+                curSize += pageSize;
+                return entries;
+            }
+
+            @Override
+            public void remove() {
+                throw new RuntimeException("Cannot remove");
+            }
+
+        };
+
+        return new Iterable<SortedMap<Long, Long>>() {
+            public Iterator<SortedMap<Long, Long>> iterator() {
+                return iterator;
+            }
+        };
     }
 
     /**

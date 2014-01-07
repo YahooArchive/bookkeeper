@@ -4,8 +4,10 @@ import static com.google.common.base.Preconditions.checkArgument;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
+import java.util.SortedMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ExecutorService;
@@ -30,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.RateLimiter;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -403,6 +406,40 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     @Override
     public EntryLogger getEntryLogger() {
         return entryLogger;
+    }
+
+    /**
+     * Add an already existing ledger to the index.
+     * 
+     * This method is only used as a tool to help the migration from InterleaveLedgerStorage to DbLedgerStorage
+     * 
+     * @param ledgerId
+     *            the ledger id
+     * @param entries
+     *            a map of entryId -> location
+     * @return the number of
+     */
+    public long addLedgerToIndex(long ledgerId, boolean isFenced, byte[] masterKey,
+            Iterable<SortedMap<Long, Long>> entries) throws Exception {
+        LedgerData ledgerData = LedgerData.newBuilder().setExists(true).setFenced(isFenced)
+                .setMasterKey(ByteString.copyFrom(masterKey)).build();
+        ledgerIndex.set(ledgerId, ledgerData);
+        long numberOfEntries = 0;
+
+        // Iterate over all the entries pages
+        for (SortedMap<Long, Long> page : entries) {
+            Multimap<Long, LongPair> locationMap = ArrayListMultimap.create();
+            List<LongPair> locations = Lists.newArrayListWithExpectedSize(page.size());
+            for (long entryId : page.keySet()) {
+                locations.add(new LongPair(entryId, page.get(entryId)));
+                ++numberOfEntries;
+            }
+
+            locationMap.putAll(ledgerId, locations);
+            entryLocationIndex.addLocations(locationMap);
+        }
+
+        return numberOfEntries;
     }
 
     private static final Logger log = LoggerFactory.getLogger(DbLedgerStorage.class);
