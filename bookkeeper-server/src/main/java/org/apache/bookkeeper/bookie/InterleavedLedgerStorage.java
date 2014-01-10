@@ -55,7 +55,7 @@ public class InterleavedLedgerStorage implements CompactableLedgerStorage {
     // has lower remaining percentage to reclaim disk space.
     GarbageCollectorThread gcThread;
 
-    InterleavedLedgerStorage() {
+    public InterleavedLedgerStorage() {
         activeLedgers = new SnapshotMap<Long, Boolean>();
     }
 
