@@ -128,7 +128,8 @@ class LedgerRecoveryOp implements ReadCallback, AddCallback {
             return;
         }
 
-        if (rc == BKException.Code.NoSuchEntryException || rc == BKException.Code.NoSuchLedgerExistsException) {
+        if (rc == BKException.Code.NoSuchEntryException || rc == BKException.Code.NoSuchLedgerExistsException
+                || rc == BKException.Code.EntryTrimmedException) {
             lh.asyncCloseInternal(new CloseCallback() {
                 @Override
                 public void closeComplete(int rc, LedgerHandle lh, Object ctx) {
