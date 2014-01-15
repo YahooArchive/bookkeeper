@@ -2,6 +2,7 @@ package org.apache.bookkeeper.bookie.storage.ldb;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.Map.Entry;
 
@@ -13,6 +14,8 @@ import org.iq80.leveldb.Options;
 import org.iq80.leveldb.ReadOptions;
 import org.iq80.leveldb.WriteBatch;
 import org.iq80.leveldb.WriteOptions;
+
+import com.google.common.primitives.UnsignedBytes;
 
 public class KeyValueStorageLevelDB implements KeyValueStorage {
 
@@ -144,6 +147,8 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
         };
     }
 
+    private final static Comparator<byte[]> ByteComparator = UnsignedBytes.lexicographicalComparator();
+
     @Override
     public Iterable<byte[]> keys(byte[] firstKey, final byte[] lastKey) {
         final DBIterator iterator = db.iterator(DontCache);
@@ -154,7 +159,7 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
                 return new Iterator<byte[]>() {
 
                     public boolean hasNext() {
-                        return iterator.hasNext() && compare(iterator.peekNext().getKey(), lastKey) < 0;
+                        return iterator.hasNext() && ByteComparator.compare(iterator.peekNext().getKey(), lastKey) < 0;
                     }
 
                     public byte[] next() {
@@ -179,17 +184,5 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
         DBIterator iterator = db.iterator(DontCache);
         iterator.seekToFirst();
         return iterator;
-    }
-
-    private static int compare(byte[] key1, byte[] key2) {
-        int minLen = Math.min(key1.length, key2.length);
-
-        for (int i = 0; i < minLen; i++) {
-            if (key1[i] != key2[i]) {
-                return Byte.compare(key1[i], key2[i]);
-            }
-        }
-
-        return Integer.compare(key1.length, key2.length);
     }
 }
