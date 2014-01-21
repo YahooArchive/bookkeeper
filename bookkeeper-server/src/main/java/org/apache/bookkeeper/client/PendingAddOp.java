@@ -23,6 +23,8 @@ import java.net.InetSocketAddress;
 import org.apache.bookkeeper.client.AsyncCallback.AddCallback;
 import org.apache.bookkeeper.proto.BookieProtocol;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.WriteCallback;
+import org.apache.bookkeeper.stats.OpStatsLogger;
+import org.apache.bookkeeper.util.MathUtils;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,14 +52,18 @@ class PendingAddOp implements WriteCallback {
 
     LedgerHandle lh;
     boolean isRecoveryAdd = false;
+    long requestTimeMillis;
+    OpStatsLogger addOpLogger;
 
     PendingAddOp(LedgerHandle lh, AddCallback cb, Object ctx) {
         this.lh = lh;
         this.cb = cb;
         this.ctx = ctx;
         this.entryId = LedgerHandle.INVALID_ENTRY_ID;
-        
+
         ackSet = lh.distributionSchedule.getAckSet();
+
+        addOpLogger = lh.bk.getAddOpLogger();
     }
 
     /**
@@ -121,7 +127,9 @@ class PendingAddOp implements WriteCallback {
         sendWriteRequest(bookieIndex);
     }
 
+
     void initiate(ChannelBuffer toSend) {
+        requestTimeMillis = MathUtils.now();
         this.toSend = toSend;
         for (int bookieIndex : writeSet) {
             sendWriteRequest(bookieIndex);
@@ -175,11 +183,14 @@ class PendingAddOp implements WriteCallback {
     }
 
     void submitCallback(final int rc) {
+        long latencyMillis = MathUtils.now() - requestTimeMillis;
         if (rc != BKException.Code.OK) {
+            addOpLogger.registerFailedEvent(latencyMillis);
             LOG.error("Write of ledger entry to quorum failed: L{} E{}",
                       lh.getId(), entryId);
+        } else {
+            addOpLogger.registerSuccessfulEvent(latencyMillis);
         }
-
         cb.addComplete(rc, lh, entryId, ctx);
     }
 

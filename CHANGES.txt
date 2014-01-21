@@ -1,3 +1,17 @@
+CMS-4.2 - internal branch
+
+  BOOKKEEPER-564: Better checkpoint mechanism (sijie & ivank) [BACKPORT]
+
+  BOOKKEEPER-614: Generic stats interface, which multiple providers can be plugged into (sijie & ivank via ivank) [BACKPORT]
+
+  BOOKKEEPER-615: Twitter stats implementation of stats interface (sijie via ivank) [BACKPORT]
+
+  BOOKKEEPER-699: Codahale metrics implementation of stats API (ivank via sijie) [BACKPORT]
+
+  BOOKKEEPER-714: Logging channel exceptions in PerChannelBookieClient (sijie) [BACKPORT]
+
+  BOOKKEEPER-696: stats collection on bookkeeper client (Aniruddha, ivank via sijie) [BACKPORT]
+
 Release 4.2.2 - 2013-09-10
 
   Backward compatible changes:
