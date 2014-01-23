@@ -28,23 +28,36 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.SortedMap;
+import java.util.List;
+import java.util.ArrayList;
 
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.bookkeeper.meta.LedgerManagerFactory;
+import org.apache.bookkeeper.meta.LedgerManager;
+import org.apache.bookkeeper.meta.LedgerManager.LedgerRangeIterator;
+import org.apache.bookkeeper.meta.LedgerManager.LedgerRange;
 import org.apache.bookkeeper.meta.LedgerUnderreplicationManager;
 import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
 
+import org.apache.bookkeeper.replication.AuditorElector;
 import org.apache.bookkeeper.bookie.EntryLogger.EntryLogScanner;
 import org.apache.bookkeeper.bookie.Journal.JournalScanner;
 import org.apache.bookkeeper.bookie.Journal.LastLogMark;
 import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorage;
 import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.BookKeeperAdmin;
+import org.apache.bookkeeper.client.BookKeeper;
+import org.apache.bookkeeper.client.LedgerHandle;
+import org.apache.bookkeeper.client.LedgerMetadata;
 import org.apache.bookkeeper.conf.ClientConfiguration;
 import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.util.BookKeeperConstants;
 import org.apache.bookkeeper.util.EntryFormatter;
 import org.apache.bookkeeper.util.Tool;
 import org.apache.bookkeeper.util.ZkUtils;
+import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
+
+import com.google.common.util.concurrent.AbstractFuture;
 
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.CompositeConfiguration;
@@ -76,6 +89,11 @@ public class BookieShell implements Tool {
     static final String CMD_BOOKIEFORMAT = "bookieformat";
     static final String CMD_RECOVER = "recover";
     static final String CMD_LEDGER = "ledger";
+    static final String CMD_LISTLEDGERS = "listledgers";
+    static final String CMD_LEDGERMETADATA = "ledgermetadata";
+    static final String CMD_LISTUNDERREPLICATED = "listunderreplicated";
+    static final String CMD_WHOISAUDITOR = "whoisauditor";
+    static final String CMD_SIMPLETEST = "simpletest";
     static final String CMD_READLOG = "readlog";
     static final String CMD_READJOURNAL = "readjournal";
     static final String CMD_LASTMARK = "lastmark";
@@ -335,6 +353,247 @@ public class BookieShell implements Tool {
         @Override
         String getUsage() {
             return "ledger [-m] <ledger_id>";
+        }
+
+        @Override
+        Options getOptions() {
+            return lOpts;
+        }
+    }
+
+    /**
+     * Command for listing underreplicated ledgers
+     */
+    class ListUnderreplicatedCmd extends MyCommand {
+        Options opts = new Options();
+
+        public ListUnderreplicatedCmd() {
+            super(CMD_LISTUNDERREPLICATED);
+        }
+
+        @Override
+        Options getOptions() {
+            return opts;
+        }
+
+        @Override
+        String getDescription() {
+            return "List ledgers marked as underreplicated";
+        }
+
+        @Override
+        String getUsage() {
+            return "listunderreplicated";
+        }
+
+        @Override
+        int runCmd(CommandLine cmdLine) throws Exception {
+            ZooKeeper zk = null;
+            try {
+                ZooKeeperWatcherBase w = new ZooKeeperWatcherBase(bkConf.getZkTimeout());
+                zk = ZkUtils.createConnectedZookeeperClient(bkConf.getZkServers(), w);
+                LedgerManagerFactory mFactory = LedgerManagerFactory.newLedgerManagerFactory(bkConf, zk);
+                LedgerUnderreplicationManager underreplicationManager = mFactory.newLedgerUnderreplicationManager();
+                Iterator<Long> iter = underreplicationManager.listLedgersToRereplicate();
+                while (iter.hasNext()) {
+                    System.out.println(iter.next());
+                }
+            } finally {
+                if (zk != null) {
+                    zk.close();
+                }
+            }
+
+            return 0;
+        }
+    }
+
+    /**
+     * Command to list all ledgers in the cluster
+     */
+    class ListLedgersCmd extends MyCommand {
+        Options lOpts = new Options();
+
+        ListLedgersCmd() {
+            super(CMD_LISTLEDGERS);
+            lOpts.addOption("m", "meta", false, "Print metadata");
+
+        }
+
+        @Override
+        public int runCmd(CommandLine cmdLine) throws Exception {
+            ZooKeeper zk = null;
+            try {
+                ZooKeeperWatcherBase w = new ZooKeeperWatcherBase(bkConf.getZkTimeout());
+                zk = ZkUtils.createConnectedZookeeperClient(bkConf.getZkServers(), w);
+                LedgerManagerFactory mFactory = LedgerManagerFactory.newLedgerManagerFactory(bkConf, zk);
+                LedgerManager m = mFactory.newLedgerManager();
+                LedgerRangeIterator iter = m.getLedgerRanges();
+                if (cmdLine.hasOption("m")) {
+                    List<ReadMetadataCallback> futures = new ArrayList<ReadMetadataCallback>(1000);
+                    while (iter.hasNext()) {
+                        LedgerRange r = iter.next();
+                        for (Long lid : r.getLedgers()) {
+                            ReadMetadataCallback cb = new ReadMetadataCallback();
+                            m.readLedgerMetadata(lid, cb);
+                            futures.add(cb);
+                        }
+                        if (futures.size() >= 1000) {
+                            while (futures.size() > 0) {
+                                ReadMetadataCallback cb = futures.remove(0);
+                                LedgerMetadata md = cb.get();
+                                System.out.println(new String(md.serialize()));
+                            }
+                        }
+                    }
+                    while (futures.size() > 0) {
+                        ReadMetadataCallback cb = futures.remove(0);
+                        LedgerMetadata md = cb.get();
+                        System.out.println(new String(md.serialize()));
+                    }
+                } else {
+                    while (iter.hasNext()) {
+                        LedgerRange r = iter.next();
+                        for (Long lid : r.getLedgers()) {
+                            System.out.println(Long.toString(lid));
+                        }
+                    }
+                }
+            } finally {
+                if (zk != null) {
+                    zk.close();
+                }
+            }
+
+            return 0;
+        }
+
+        @Override
+        String getDescription() {
+            return "List all ledgers on the cluster (this may take along time)";
+        }
+
+        @Override
+        String getUsage() {
+            return "listsledger";
+        }
+
+        @Override
+        Options getOptions() {
+            return lOpts;
+        }
+    }
+
+    static class ReadMetadataCallback extends AbstractFuture<LedgerMetadata>
+        implements GenericCallback<LedgerMetadata> {
+        public void operationComplete(int rc, LedgerMetadata result) {
+            if (rc != 0) {
+                setException(BKException.create(rc));
+            } else {
+                set(result);
+            }
+        }
+    }
+
+    /**
+     * Print the metadata for a ledger
+     */
+    class LedgerMetadataCmd extends MyCommand {
+        Options lOpts = new Options();
+
+        LedgerMetadataCmd() {
+            super(CMD_LEDGERMETADATA);
+            lOpts.addOption("l", "ledgerid", true, "Ledger ID");
+        }
+
+        @Override
+        public int runCmd(CommandLine cmdLine) throws Exception {
+            final long lid = getOptionLongValue(cmdLine, "ledgerid", -1);
+            if (lid == -1) {
+                System.err.println("Must specify a ledger id");
+                return -1;
+            }
+
+            ZooKeeper zk = null;
+            try {
+                ZooKeeperWatcherBase w = new ZooKeeperWatcherBase(bkConf.getZkTimeout());
+                zk = ZkUtils.createConnectedZookeeperClient(bkConf.getZkServers(), w);
+                LedgerManagerFactory mFactory = LedgerManagerFactory.newLedgerManagerFactory(bkConf, zk);
+                LedgerManager m = mFactory.newLedgerManager();
+                ReadMetadataCallback cb = new ReadMetadataCallback();
+                m.readLedgerMetadata(lid, cb);
+                LedgerMetadata md = cb.get();
+                System.out.println(new String(md.serialize()));
+            } finally {
+                if (zk != null) {
+                    zk.close();
+                }
+            }
+
+            return 0;
+        }
+
+        @Override
+        String getDescription() {
+            return "Print the metadata for a ledger";
+        }
+
+        @Override
+        String getUsage() {
+            return "ledgermetadata -ledgerid <ledgerid>";
+        }
+
+        @Override
+        Options getOptions() {
+            return lOpts;
+        }
+    }
+
+    /**
+     * Simple test to create a ledger and write to it
+     */
+    class SimpleTestCmd extends MyCommand {
+        Options lOpts = new Options();
+
+        SimpleTestCmd() {
+            super(CMD_SIMPLETEST);
+            lOpts.addOption("e", "ensemble", true, "Ensemble size (default 3)");
+            lOpts.addOption("w", "writeQuorum", true, "Write quorum size (default 2)");
+            lOpts.addOption("a", "ackQuorum", true, "Ack quorum size (default 2)");
+            lOpts.addOption("n", "numEntries", true, "Entries to write (default 1000)");
+        }
+
+        @Override
+        public int runCmd(CommandLine cmdLine) throws Exception {
+            byte[] data = new byte[100]; // test data
+
+            int ensemble = getOptionIntValue(cmdLine, "ensemble", 3);
+            int writeQuorum = getOptionIntValue(cmdLine, "writeQuorum", 2);
+            int ackQuorum = getOptionIntValue(cmdLine, "ackQuorum", 2);
+            int numEntries = getOptionIntValue(cmdLine, "numEntries", 1000);
+
+            ClientConfiguration conf = new ClientConfiguration();
+            conf.addConfiguration(bkConf);
+            BookKeeper bk = BookKeeper.forConfig(conf).build();
+            LedgerHandle lh = bk.createLedger(ensemble, writeQuorum, ackQuorum,
+                                              BookKeeper.DigestType.MAC, new byte[0]);
+            for (int i = 0; i < numEntries; i++) {
+                lh.addEntry(data);
+            }
+            lh.close();
+            bk.close();
+
+            return 0;
+        }
+
+        @Override
+        String getDescription() {
+            return "Simple test to create a ledger and write entries to it";
+        }
+
+        @Override
+        String getUsage() {
+            return "simpletest";
         }
 
         @Override
@@ -639,6 +898,61 @@ public class BookieShell implements Tool {
         }
     }
 
+    /**
+     * Print which node has the auditor lock
+     */
+    class WhoIsAuditorCmd extends MyCommand {
+        Options opts = new Options();
+
+        public WhoIsAuditorCmd() {
+            super(CMD_WHOISAUDITOR);
+        }
+
+        @Override
+        Options getOptions() {
+            return opts;
+        }
+
+        @Override
+        String getDescription() {
+            return "Print the node which holds the auditor lock";
+        }
+
+        @Override
+        String getUsage() {
+            return "whoisauditor";
+        }
+
+        @Override
+        int runCmd(CommandLine cmdLine) throws Exception {
+            final String electionRoot = bkConf.getZkLedgersRootPath()
+                + '/' + BookKeeperConstants.UNDER_REPLICATION_NODE
+                + "/auditorelection";
+
+            ZooKeeper zk = null;
+            try {
+                ZooKeeperWatcherBase w = new ZooKeeperWatcherBase(bkConf.getZkTimeout());
+                zk = ZkUtils.createConnectedZookeeperClient(bkConf.getZkServers(), w);
+                InetSocketAddress bookieId = AuditorElector.getCurrentAuditor(bkConf, zk);
+                if (bookieId == null) {
+                    LOG.info("No auditor elected");
+                    return -1;
+                }
+                LOG.info("Auditor: {}/{}:{}",
+                         new Object[] {
+                             bookieId.getAddress().getCanonicalHostName(),
+                             bookieId.getAddress().getHostAddress(),
+                             bookieId.getPort() });
+            } finally {
+                if (zk != null) {
+                    zk.close();
+                }
+            }
+
+            return 0;
+        }
+    }
+
     final Map<String, Command> commands;
     {
         commands = new HashMap<String, Command>();
@@ -646,6 +960,11 @@ public class BookieShell implements Tool {
         commands.put(CMD_BOOKIEFORMAT, new BookieFormatCmd());
         commands.put(CMD_RECOVER, new RecoverCmd());
         commands.put(CMD_LEDGER, new LedgerCmd());
+        commands.put(CMD_LISTLEDGERS, new ListLedgersCmd());
+        commands.put(CMD_LISTUNDERREPLICATED, new ListUnderreplicatedCmd());
+        commands.put(CMD_WHOISAUDITOR, new WhoIsAuditorCmd());
+        commands.put(CMD_LEDGERMETADATA, new LedgerMetadataCmd());
+        commands.put(CMD_SIMPLETEST, new SimpleTestCmd());
         commands.put(CMD_READLOG, new ReadLogCmd());
         commands.put(CMD_READJOURNAL, new ReadJournalCmd());
         commands.put(CMD_LASTMARK, new LastMarkCmd());
@@ -672,6 +991,11 @@ public class BookieShell implements Tool {
         System.err.println("       bookieformat [-nonInteractive] [-force]");
         System.err.println("       recover      <bookieSrc> [bookieDest]");
         System.err.println("       ledger       [-meta] <ledger_id>");
+        System.err.println("       listledgers  [-meta]");
+        System.err.println("       ledgermetadata -ledgerid <ledger_id>");
+        System.err.println("       listunderreplicated");
+        System.err.println("       whoisauditor");
+        System.err.println("       simpletest");
         System.err.println("       readlog      [-msg] <entry_log_id|entry_log_file_name>");
         System.err.println("       readjournal  [-msg] <journal_id|journal_file_name>");
         System.err.println("       autorecovery [-enable|-disable]");
@@ -1060,5 +1384,31 @@ public class BookieShell implements Tool {
             formatter.format("%02x", b);
         }
         return sb.toString();
+    }
+
+    private static int getOptionIntValue(CommandLine cmdLine, String option, int defaultVal) {
+        if (cmdLine.hasOption(option)) {
+            String val = cmdLine.getOptionValue(option);
+            try {
+                return Integer.parseInt(val);
+            } catch (NumberFormatException nfe) {
+                System.err.println("ERROR: invalid value for option " + option + " : " + val);
+                return defaultVal;
+            }
+        }
+        return defaultVal;
+    }
+
+    private static long getOptionLongValue(CommandLine cmdLine, String option, long defaultVal) {
+        if (cmdLine.hasOption(option)) {
+            String val = cmdLine.getOptionValue(option);
+            try {
+                return Long.parseLong(val);
+            } catch (NumberFormatException nfe) {
+                System.err.println("ERROR: invalid value for option " + option + " : " + val);
+                return defaultVal;
+            }
+        }
+        return defaultVal;
     }
 }
