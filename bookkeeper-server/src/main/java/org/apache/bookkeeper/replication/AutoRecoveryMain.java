@@ -34,6 +34,9 @@ import org.apache.bookkeeper.replication.ReplicationException.UnavailableExcepti
 import org.apache.bookkeeper.util.ZkUtils;
 import org.apache.bookkeeper.util.StringUtils;
 import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
+import org.apache.bookkeeper.stats.Stats;
+import org.apache.bookkeeper.stats.StatsProvider;
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.commons.cli.BasicParser;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.HelpFormatter;
@@ -63,7 +66,7 @@ public class AutoRecoveryMain {
     private volatile boolean shuttingDown = false;
     private volatile boolean running = false;
 
-    public AutoRecoveryMain(ServerConfiguration conf) throws IOException,
+    public AutoRecoveryMain(ServerConfiguration conf, StatsLogger stats) throws IOException,
             InterruptedException, KeeperException, UnavailableException,
             CompatibilityException {
         this.conf = conf;
@@ -82,18 +85,11 @@ public class AutoRecoveryMain {
         };
         zk = ZkUtils.createConnectedZookeeperClient(conf.getZkServers(), w);
         auditorElector = new AuditorElector(
-                StringUtils.addrToString(Bookie.getBookieAddress(conf)), conf, zk);
+                StringUtils.addrToString(Bookie.getBookieAddress(conf)),
+                conf, zk, stats);
         replicationWorker = new ReplicationWorker(zk, conf,
-                Bookie.getBookieAddress(conf));
-        deathWatcher = new AutoRecoveryDeathWatcher(this);
-    }
-
-    public AutoRecoveryMain(ServerConfiguration conf, ZooKeeper zk) throws IOException, InterruptedException, KeeperException,
-            UnavailableException, CompatibilityException {
-        this.conf = conf;
-        this.zk = zk;
-        auditorElector = new AuditorElector(StringUtils.addrToString(Bookie.getBookieAddress(conf)), conf, zk);
-        replicationWorker = new ReplicationWorker(zk, conf, Bookie.getBookieAddress(conf));
+                                                  Bookie.getBookieAddress(conf),
+                                                  stats);
         deathWatcher = new AutoRecoveryDeathWatcher(this);
     }
 
@@ -270,7 +266,12 @@ public class AutoRecoveryMain {
         }
 
         try {
-            final AutoRecoveryMain autoRecoveryMain = new AutoRecoveryMain(conf);
+            Stats.loadStatsProvider(conf);
+            StatsProvider statsProvider = Stats.get();
+            statsProvider.start(conf);
+            StatsLogger stats = statsProvider.getStatsLogger("autorecovery");
+
+            final AutoRecoveryMain autoRecoveryMain = new AutoRecoveryMain(conf, stats);
             autoRecoveryMain.start();
             Runtime.getRuntime().addShutdownHook(new Thread() {
                 @Override

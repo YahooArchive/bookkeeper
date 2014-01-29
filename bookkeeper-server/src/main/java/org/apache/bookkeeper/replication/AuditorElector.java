@@ -31,10 +31,15 @@ import java.net.InetSocketAddress;
 
 import org.apache.bookkeeper.proto.DataFormats.AuditorVoteFormat;
 import com.google.common.annotations.VisibleForTesting;
+
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.apache.bookkeeper.stats.StatsLogger;
+import org.apache.bookkeeper.stats.Counter;
+import org.apache.bookkeeper.stats.Gauge;
 
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.replication.ReplicationException.UnavailableException;
@@ -87,6 +92,8 @@ public class AuditorElector {
     Auditor auditor;
     private AtomicBoolean running = new AtomicBoolean(false);
 
+    private final StatsLogger stats;
+    private final Counter electionCounter;
 
     /**
      * AuditorElector for performing the auditor election
@@ -101,14 +108,27 @@ public class AuditorElector {
      *             throws unavailable exception while initializing the elector
      */
     public AuditorElector(final String bookieId, ServerConfiguration conf,
-                          ZooKeeper zkc) throws UnavailableException {
+                          ZooKeeper zkc, StatsLogger stats) throws UnavailableException {
         this.bookieId = bookieId;
         this.conf = conf;
         this.zkc = zkc;
+        this.stats = stats.scope("auditor");
         basePath = conf.getZkLedgersRootPath() + '/'
                 + BookKeeperConstants.UNDER_REPLICATION_NODE;
         electionPath = basePath + '/' + ELECTION_ZNODE;
         createElectorPath();
+
+        this.stats.registerGauge("elected",
+                                 new Gauge<Integer>() {
+                                     public Integer getDefaultValue() {
+                                         return 0;
+                                     }
+                                     public Integer getSample() {
+                                         return auditor == null ? 0 : 1;
+                                     }
+                                 });
+        electionCounter = this.stats.getCounter("numElections");
+
         executor = Executors.newSingleThreadExecutor(new ThreadFactory() {
                 @Override
                 public Thread newThread(Runnable r) {
@@ -219,6 +239,8 @@ public class AuditorElector {
                     if (!running.get()) {
                         return;
                     }
+                    electionCounter.inc();
+
                     try {
                         // creating my vote in zk. Vote format is 'V_numeric'
                         createMyVote();
@@ -243,7 +265,7 @@ public class AuditorElector {
 
                             zkc.setData(getVotePath(""),
                                         TextFormat.printToString(builder.build()).getBytes(UTF_8), -1);
-                            auditor = new Auditor(bookieId, conf, zkc);
+                            auditor = new Auditor(bookieId, conf, zkc, stats);
                             auditor.start();
                         } else {
                             // If not an auditor, will be watching to my predecessor and

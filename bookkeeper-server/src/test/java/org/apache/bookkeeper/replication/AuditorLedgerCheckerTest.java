@@ -33,6 +33,7 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.LedgerHandle;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
@@ -112,7 +113,7 @@ public class AuditorLedgerCheckerTest extends MultiLedgerManagerTestCase {
         for (BookieServer bserver : bs) {
             String addr = StringUtils.addrToString(bserver.getLocalAddress());
             AuditorElector auditorElector = new AuditorElector(addr,
-                    baseConf, zkc);
+                    baseConf, zkc, NullStatsLogger.INSTANCE);
             auditorElectors.put(addr, auditorElector);
             auditorElector.start();
             LOG.debug("Starting Auditor Elector");

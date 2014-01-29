@@ -34,6 +34,7 @@ import java.io.FilenameFilter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
+import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.bookie.BookieAccessor;
 import org.apache.bookkeeper.util.StringUtils;
 import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
@@ -92,7 +93,7 @@ public class AuditorPeriodicCheckTest extends BookKeeperClusterTestCase {
             zkClients.add(zk);
 
             AuditorElector auditorElector = new AuditorElector(addr,
-                                                               conf, zk);
+                    conf, zk, NullStatsLogger.INSTANCE);
             auditorElectors.put(addr, auditorElector);
             auditorElector.start();
             LOG.debug("Starting Auditor Elector");
@@ -303,7 +304,7 @@ public class AuditorPeriodicCheckTest extends BookKeeperClusterTestCase {
         conf.setAllowLoopback(true);
         final Auditor auditor = new Auditor(
                 StringUtils.addrToString(Bookie.getBookieAddress(conf)),
-                conf, zkc);
+                conf, zkc, NullStatsLogger.INSTANCE);
         final AtomicBoolean exceptionCaught = new AtomicBoolean(false);
         final CountDownLatch latch = new CountDownLatch(1);
         Thread t = new Thread() {

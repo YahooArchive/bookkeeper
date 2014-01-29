@@ -106,7 +106,7 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
         this.bookie = newBookie(conf, stats);
         isAutoRecoveryDaemonEnabled = conf.isAutoRecoveryDaemonEnabled();
         if (isAutoRecoveryDaemonEnabled) {
-            this.autoRecoveryMain = new AutoRecoveryMain(conf);
+            this.autoRecoveryMain = new AutoRecoveryMain(conf, stats);
         }
         isStatsEnabled = conf.isStatisticsEnabled();
 

@@ -49,6 +49,7 @@ import org.apache.bookkeeper.client.BookiesListener;
 import org.apache.bookkeeper.util.StringUtils;
 
 import org.apache.bookkeeper.util.ZkUtils;
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
 
 import org.apache.bookkeeper.conf.ServerConfiguration;
@@ -89,10 +90,13 @@ public class Auditor implements BookiesListener {
     private final ScheduledExecutorService executor;
     private List<String> knownBookies = new ArrayList<String>();
 
+    private final StatsLogger stats;
+
     public Auditor(final String bookieIdentifier, ServerConfiguration conf,
-                   ZooKeeper zkc) throws UnavailableException {
+                   ZooKeeper zkc, StatsLogger stats) throws UnavailableException {
         this.conf = conf;
         initialize(conf, zkc);
+        this.stats = stats;
 
         executor = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
                 @Override

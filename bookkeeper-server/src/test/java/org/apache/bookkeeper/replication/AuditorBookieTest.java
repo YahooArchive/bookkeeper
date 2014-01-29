@@ -30,6 +30,7 @@ import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.proto.BookieServer;
 import org.apache.bookkeeper.util.ZkUtils;
 import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
+import org.apache.bookkeeper.stats.NullStatsLogger;
 
 import org.apache.bookkeeper.test.BookKeeperClusterTestCase;
 import org.apache.bookkeeper.util.StringUtils;
@@ -214,7 +215,7 @@ public class AuditorBookieTest extends BookKeeperClusterTestCase {
         zkClients.add(zk);
 
         AuditorElector auditorElector = new AuditorElector(addr,
-                                                           baseConf, zk);
+                baseConf, zk, NullStatsLogger.INSTANCE);
         auditorElectors.put(addr, auditorElector);
         auditorElector.start();
         LOG.debug("Starting Auditor Elector");
