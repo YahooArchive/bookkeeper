@@ -108,6 +108,8 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
     volatile private ClientAuthProvider authProvider = null;
     private final ExtensionRegistry extRegistry;
 
+    private final int readTimeout;
+
     public PerChannelBookieClient(ClientConfiguration conf, OrderedSafeExecutor executor, ClientSocketChannelFactory channelFactory,
                                   InetSocketAddress addr, AtomicLong totalBytesOutstanding,
                                   ClientAuthProvider.Factory authProviderFactory, ExtensionRegistry extRegistry) {
@@ -117,6 +119,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         this.totalBytesOutstanding = totalBytesOutstanding;
         this.channelFactory = channelFactory;
         this.state = ConnectionState.DISCONNECTED;
+        this.readTimeout = conf.getReadTimeout();
 
         this.authProviderFactory = authProviderFactory;
         this.extRegistry = extRegistry;
@@ -643,7 +646,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         ChannelPipeline pipeline = Channels.pipeline();
 
         pipeline.addLast("readTimeout", new ReadTimeoutHandler(new HashedWheelTimer(),
-                                                               conf.getReadTimeout()));
+                                                               readTimeout));
         pipeline.addLast("lengthbasedframedecoder", new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, 0, 4, 0, 4));
         pipeline.addLast("mainhandler", this);
         return pipeline;
@@ -937,7 +940,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         CompletionKey(long ledgerId, long entryId) {
             this.ledgerId = ledgerId;
             this.entryId = entryId;
-            this.timeoutAt = MathUtils.now() + (conf.getReadTimeout()*1000);
+            this.timeoutAt = MathUtils.now() + (readTimeout*1000);
         }
 
         @Override
