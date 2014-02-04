@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map.Entry;
 
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage;
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageLevelDB;
 import org.junit.Test;
 
@@ -48,24 +49,39 @@ public class KeyValueStorageLevelDbTest {
 
         // Iterate
         List<Long> foundKeys = Lists.newArrayList();
-        for (Entry<byte[], byte[]> entry : db) {
-            foundKeys.add(fromArray(entry.getKey()));
+        CloseableIterator<Entry<byte[], byte[]>> iter = db.iterator();
+        try {
+            while (iter.hasNext()) {
+                foundKeys.add(fromArray(iter.next().getKey()));
+            }
+        } finally {
+            iter.close();
         }
 
         assertEquals(Lists.newArrayList(3l, 5l), foundKeys);
 
         // Iterate over keys
         foundKeys = Lists.newArrayList();
-        for (byte[] key : db.keys()) {
-            foundKeys.add(fromArray(key));
+        CloseableIterator<byte[]> iter2 = db.keys();
+        try {
+            while (iter2.hasNext()) {
+                foundKeys.add(fromArray(iter2.next()));
+            }
+        } finally {
+            iter2.close();
         }
 
         assertEquals(Lists.newArrayList(3l, 5l), foundKeys);
 
         // Scan with limits
         foundKeys = Lists.newArrayList();
-        for (byte[] key : db.keys(toArray(1), toArray(4))) {
-            foundKeys.add(fromArray(key));
+        iter2 = db.keys(toArray(1), toArray(4));
+        try {
+            while (iter2.hasNext()) {
+                foundKeys.add(fromArray(iter2.next()));
+            }
+        } finally {
+            iter2.close();
         }
 
         assertEquals(Lists.newArrayList(3l), foundKeys);

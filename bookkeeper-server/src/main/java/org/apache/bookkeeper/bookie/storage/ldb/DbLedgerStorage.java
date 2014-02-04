@@ -378,7 +378,8 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     }
 
     @Override
-    public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId) {
+    public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId)
+            throws IOException {
         return ledgerIndex.getActiveLedgersInRange(firstLedgerId, lastLedgerId);
     }
 

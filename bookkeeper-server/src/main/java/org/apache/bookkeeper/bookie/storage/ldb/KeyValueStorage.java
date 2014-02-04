@@ -2,10 +2,9 @@ package org.apache.bookkeeper.bookie.storage.ldb;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.Map.Entry;
 
-public interface KeyValueStorage extends Iterable<Entry<byte[], byte[]>>, Closeable {
+public interface KeyValueStorage extends Closeable {
 
     void put(byte[] key, byte[] value) throws IOException;
 
@@ -59,7 +58,7 @@ public interface KeyValueStorage extends Iterable<Entry<byte[], byte[]>>, Closea
      * 
      * @return
      */
-    Iterable<byte[]> keys();
+    CloseableIterator<byte[]> keys();
 
     /**
      * Get an iterator over to scan sequentially through all the keys within a specified range.
@@ -70,12 +69,15 @@ public interface KeyValueStorage extends Iterable<Entry<byte[], byte[]>>, Closea
      *            the lastKey in the range (not included)
      * 
      */
-    Iterable<byte[]> keys(byte[] firstKey, byte[] lastKey);
+    CloseableIterator<byte[]> keys(byte[] firstKey, byte[] lastKey);
 
     /**
      * Return an iterator object that can be used to sequentially scan through all the entries in the database
      */
-    @Override
-    Iterator<Entry<byte[], byte[]>> iterator();
+    CloseableIterator<Entry<byte[], byte[]>> iterator();
 
+    interface CloseableIterator<T> extends Closeable {
+        public boolean hasNext() throws IOException;
+        public T next() throws IOException;
+    }
 }
