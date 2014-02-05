@@ -10,6 +10,7 @@ import java.util.Set;
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
 import org.apache.bookkeeper.bookie.storage.ldb.SortedLruCache.Weighter;
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -182,13 +183,19 @@ public class EntryLocationIndex implements Closeable {
         LongPair lastKey = new LongPair(ledgerId + 1, 0);
         log.debug("Deleting from {} to {}", firstKey, lastKey);
 
-        for (byte[] key : locationsDb.keys(firstKey.toArray(), lastKey.toArray())) {
-            if (log.isDebugEnabled()) {
-                log.debug("Deleting ledger index page ({}, {})", LongPair.fromArray(key).first,
-                        LongPair.fromArray(key).second);
-            }
+        CloseableIterator<byte[]> iter = locationsDb.keys(firstKey.toArray(), lastKey.toArray());
+        try {
+            while (iter.hasNext()) {
+                byte[] key = iter.next();
+                if (log.isDebugEnabled()) {
+                    log.debug("Deleting ledger index page ({}, {})", LongPair.fromArray(key).first,
+                              LongPair.fromArray(key).second);
+                }
 
-            keys.add(key);
+                keys.add(key);
+            }
+        } finally {
+            iter.close();
         }
 
         locationsDb.delete(keys);

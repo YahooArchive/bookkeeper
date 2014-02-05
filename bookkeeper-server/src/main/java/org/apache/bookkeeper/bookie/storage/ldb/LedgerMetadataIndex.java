@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorageDataFormats.LedgerData;
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,10 +80,16 @@ public class LedgerMetadataIndex implements Closeable {
         ledgersCache.invalidate(ledgerId);
     }
 
-    public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId) {
+    public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId)
+            throws IOException {
         List<Long> ledgerIds = Lists.newArrayList();
-        for (byte[] key : ledgersDb.keys(toArray(firstLedgerId), toArray(lastLedgerId))) {
-            ledgerIds.add(fromArray(key));
+        CloseableIterator<byte[]> iter = ledgersDb.keys(toArray(firstLedgerId), toArray(lastLedgerId));
+        try {
+            while (iter.hasNext()) {
+                ledgerIds.add(fromArray(iter.next()));
+            }
+        } finally {
+            iter.close();
         }
 
         return ledgerIds;

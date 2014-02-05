@@ -60,13 +60,13 @@ public class ScanAndCompareGarbageCollector implements GarbageCollector{
 
     @Override
     public void gc(GarbageCleaner garbageCleaner) {
-        // Get a set of all ledgers on the bookie
-        NavigableSet<Long> bkActiveLedgers = Sets.newTreeSet(ledgerStorage.getActiveLedgersInRange(0, Long.MAX_VALUE));
-
-        // Iterate over all the ledger on the metadata store
-        LedgerRangeIterator ledgerRangeIterator = ledgerManager.getLedgerRanges();
-
         try {
+            // Get a set of all ledgers on the bookie
+            NavigableSet<Long> bkActiveLedgers = Sets.newTreeSet(ledgerStorage.getActiveLedgersInRange(0, Long.MAX_VALUE));
+
+            // Iterate over all the ledger on the metadata store
+            LedgerRangeIterator ledgerRangeIterator = ledgerManager.getLedgerRanges();
+
             if (!ledgerRangeIterator.hasNext()) {
                 // Empty global active ledgers, need to remove all local active ledgers.
                 for (long ledgerId : bkActiveLedgers) {

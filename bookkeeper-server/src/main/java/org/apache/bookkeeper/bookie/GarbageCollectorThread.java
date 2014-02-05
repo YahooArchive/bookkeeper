@@ -106,7 +106,8 @@ public class GarbageCollectorThread extends Thread {
          * @param lastLedgerId last ledger id in the sequence (not included)
          * @return
          */
-        Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId);
+        Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId)
+                throws IOException;
 
         /**
          * Update the location of several entries and sync the underlying storage

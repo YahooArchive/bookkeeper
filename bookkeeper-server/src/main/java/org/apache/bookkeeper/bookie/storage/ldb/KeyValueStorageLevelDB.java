@@ -3,7 +3,6 @@ package org.apache.bookkeeper.bookie.storage.ldb;
 import java.io.File;
 import java.io.IOException;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.Map.Entry;
 
 import org.fusesource.leveldbjni.JniDBFactory;
@@ -118,31 +117,29 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
     }
 
     @Override
-    public Iterable<byte[]> keys() {
+    public CloseableIterator<byte[]> keys() {
         final DBIterator iterator = db.iterator(DontCache);
         iterator.seekToFirst();
 
-        return new Iterable<byte[]>() {
-            public Iterator<byte[]> iterator() {
-                return new Iterator<byte[]>() {
+        return new CloseableIterator<byte[]>() {
+            @Override
+            public boolean hasNext() {
+                return iterator.hasNext();
+            }
 
-                    public boolean hasNext() {
-                        return iterator.hasNext();
-                    }
+            @Override
+            public byte[] next() {
+                Entry<byte[], byte[]> entry = iterator.next();
+                if (entry != null) {
+                    return entry.getKey();
+                } else {
+                    return null;
+                }
+            }
 
-                    public byte[] next() {
-                        Entry<byte[], byte[]> entry = iterator.next();
-                        if (entry != null) {
-                            return entry.getKey();
-                        } else {
-                            return null;
-                        }
-                    }
-
-                    public void remove() {
-                        throw new UnsupportedOperationException("Cannot remove from iterator");
-                    }
-                };
+            @Override
+            public void close() throws IOException {
+                iterator.close();
             }
         };
     }
@@ -150,39 +147,52 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
     private final static Comparator<byte[]> ByteComparator = UnsignedBytes.lexicographicalComparator();
 
     @Override
-    public Iterable<byte[]> keys(byte[] firstKey, final byte[] lastKey) {
+    public CloseableIterator<byte[]> keys(byte[] firstKey, final byte[] lastKey) {
         final DBIterator iterator = db.iterator(DontCache);
         iterator.seek(firstKey);
 
-        return new Iterable<byte[]>() {
-            public Iterator<byte[]> iterator() {
-                return new Iterator<byte[]>() {
+        return new CloseableIterator<byte[]>() {
+            @Override
+            public boolean hasNext() {
+                return iterator.hasNext()
+                    && ByteComparator.compare(iterator.peekNext().getKey(), lastKey) < 0;
+            }
 
-                    public boolean hasNext() {
-                        return iterator.hasNext() && ByteComparator.compare(iterator.peekNext().getKey(), lastKey) < 0;
-                    }
+            @Override
+            public byte[] next() {
+                Entry<byte[], byte[]> entry = iterator.next();
+                if (entry != null) {
+                    return entry.getKey();
+                } else {
+                    return null;
+                }
+            }
 
-                    public byte[] next() {
-                        Entry<byte[], byte[]> entry = iterator.next();
-                        if (entry != null) {
-                            return entry.getKey();
-                        } else {
-                            return null;
-                        }
-                    }
-
-                    public void remove() {
-                        throw new UnsupportedOperationException("Cannot remove from iterator");
-                    }
-                };
+            @Override
+            public void close() throws IOException {
+                iterator.close();
             }
         };
     }
 
-    @Override
-    public Iterator<Entry<byte[], byte[]>> iterator() {
-        DBIterator iterator = db.iterator(DontCache);
+    public CloseableIterator<Entry<byte[], byte[]>> iterator() {
+        final DBIterator iterator = db.iterator(DontCache);
         iterator.seekToFirst();
-        return iterator;
+        return new CloseableIterator<Entry<byte[], byte[]>>() {
+            @Override
+            public boolean hasNext() throws IOException {
+                return iterator.hasNext();
+            }
+
+            @Override
+            public Entry<byte[], byte[]> next() throws IOException {
+                return iterator.next();
+            }
+
+            @Override
+            public void close() throws IOException {
+                iterator.close();
+            }
+        };
     }
 }
