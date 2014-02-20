@@ -161,10 +161,10 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
             writeRateLimiter.acquire();
         }
 
-        ByteBuffer cachedEntry = cache.addEntry(entry);
-
         writeCacheMutex.readLock().lock();
         try {
+            ByteBuffer cachedEntry = cache.addEntry(entry);
+
             writeCache.put(new LongPair(ledgerId, entryId), cachedEntry);
             cacheSize = writeCacheSize.addAndGet(entry.remaining());
         } finally {
