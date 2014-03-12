@@ -237,7 +237,7 @@ public class Auditor implements BookiesListener {
                 LOG.info("Periodic checking disabled");
             }
 
-            executor.submit(new Runnable() {
+            Runnable bookieCheck = new Runnable() {
                     public void run() {
                         try {
                             knownBookies = getAvailableBookies();
@@ -257,7 +257,14 @@ public class Auditor implements BookiesListener {
                             submitShutdownTask();
                         }
                     }
-                });
+                };
+
+            long bookieCheckInterval = conf.getAuditorPeriodicBookieCheckInterval();
+            if (bookieCheckInterval == 0) {
+                executor.submit(bookieCheck);
+            } else {
+                executor.scheduleAtFixedRate(bookieCheck, 0, bookieCheckInterval, TimeUnit.SECONDS);
+            }
         }
     }
 
