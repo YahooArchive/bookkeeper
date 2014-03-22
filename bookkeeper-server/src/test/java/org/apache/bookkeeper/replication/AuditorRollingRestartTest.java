@@ -50,79 +50,46 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * This test verifies that the period check on the auditor
- * will pick up on missing data in the client
+ * Test auditor behaviours during a rolling restart
  */
-public class AuditorPeriodicBookieCheckTest extends BookKeeperClusterTestCase {
+public class AuditorRollingRestartTest extends BookKeeperClusterTestCase {
     private final static Logger LOG = LoggerFactory
             .getLogger(AuditorPeriodicBookieCheckTest.class);
 
-    private AuditorElector auditorElector = null;
-    private ZooKeeper auditorZookeeper = null;
-
     private final static int CHECK_INTERVAL = 1; // run every second
 
-    public AuditorPeriodicBookieCheckTest() {
+    public AuditorRollingRestartTest() {
         super(3);
-        baseConf.setPageLimit(1); // to make it easy to push ledger out of cache
-        baseConf.setAllowLoopback(true);
-    }
-
-    @Before
-    @Override
-    public void setUp() throws Exception {
-        super.setUp();
-
-        ServerConfiguration conf = new ServerConfiguration(bsConfs.get(0));
-        conf.setAllowLoopback(true);
-        conf.setAuditorPeriodicBookieCheckInterval(CHECK_INTERVAL);
-        String addr = StringUtils.addrToString(bs.get(0).getLocalAddress());
-
-        ZooKeeperWatcherBase w = new ZooKeeperWatcherBase(10000);
-        auditorZookeeper = ZkUtils.createConnectedZookeeperClient(
-                zkUtil.getZooKeeperConnectString(), w);
-
-        auditorElector = new AuditorElector(addr, conf,
-                auditorZookeeper, NullStatsLogger.INSTANCE);
-        auditorElector.start();
-    }
-
-    @After
-    @Override
-    public void tearDown() throws Exception {
-        auditorElector.shutdown();
-        auditorZookeeper.close();
-
-        super.tearDown();
+        // run the daemon within the bookie
+        baseConf.setAutoRecoveryDaemonEnabled(true);
     }
 
     /**
-     * Test that the periodic bookie checker works
+     * Test no auditing during restart if disabled
      */
     @Test(timeout=5000)
-    public void testPeriodicBookieCheckInterval() throws Exception {
+    public void testAuditingDuringRollingRestart() throws Exception {
         LedgerManagerFactory mFactory = LedgerManagerFactory.newLedgerManagerFactory(bsConfs.get(0), zkc);
-        LedgerManager ledgerManager = mFactory.newLedgerManager();
         final LedgerUnderreplicationManager underReplicationManager = mFactory.newLedgerUnderreplicationManager();
         final int numLedgers = 1;
 
         LedgerHandle lh = bkc.createLedger(3, 3, DigestType.CRC32, "passwd".getBytes());
-        LedgerMetadata md = LedgerHandleAdapter.getLedgerMetadata(lh);
-        List<InetSocketAddress> ensemble = md.getEnsembles().get(0L);
-        ensemble.set(0, new InetSocketAddress("1.1.1.1", 1000));
-        
-        TestCallbacks.GenericCallbackFuture<Void> cb = new TestCallbacks.GenericCallbackFuture<Void>();
-        ledgerManager.writeLedgerMetadata(lh.getId(), md, cb);
-        cb.get();
-
-        long underReplicatedLedger = -1;
         for (int i = 0; i < 10; i++) {
-            underReplicatedLedger = underReplicationManager.pollLedgerToRereplicate();
-            if (underReplicatedLedger != -1) {
-                break;
-            }
-            Thread.sleep(CHECK_INTERVAL*1000);
+            lh.asyncAddEntry("foobar".getBytes(), new TestCallbacks.AddCallbackFuture(), null);
         }
-        assertEquals("Ledger should be under replicated", lh.getId(), underReplicatedLedger);
+        lh.addEntry("foobar".getBytes());
+        lh.close();
+
+        assertEquals("shouldn't be anything under replicated",
+                     underReplicationManager.pollLedgerToRereplicate(), -1);
+        underReplicationManager.disableLedgerReplication();
+
+        InetSocketAddress auditor = AuditorElector.getCurrentAuditor(baseConf, zkc);
+        ServerConfiguration conf = killBookie(auditor);
+        Thread.sleep(2000);
+        startBookie(conf);
+        Thread.sleep(2000); // give it time to run
+        assertEquals("shouldn't be anything under replicated", -1,
+                underReplicationManager.pollLedgerToRereplicate());
     }
 }

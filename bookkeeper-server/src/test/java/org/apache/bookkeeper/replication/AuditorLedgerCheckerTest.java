@@ -37,9 +37,10 @@ import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.LedgerHandle;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
 import org.apache.bookkeeper.conf.ServerConfiguration;
-import org.apache.bookkeeper.meta.LedgerUnderreplicationManager;
+
 import org.apache.bookkeeper.meta.ZkLedgerUnderreplicationManager;
 import org.apache.bookkeeper.proto.BookieServer;
+import org.apache.bookkeeper.proto.DataFormats.UnderreplicatedLedgerFormat;
 import org.apache.bookkeeper.replication.ReplicationException.CompatibilityException;
 import org.apache.bookkeeper.replication.ReplicationException.UnavailableException;
 import org.apache.bookkeeper.test.MultiLedgerManagerTestCase;
@@ -73,7 +74,7 @@ public class AuditorLedgerCheckerTest extends MultiLedgerManagerTestCase {
             .getZkLedgersRootPath()
             + "/underreplication/ledgers";
     private HashMap<String, AuditorElector> auditorElectors = new HashMap<String, AuditorElector>();
-    private LedgerUnderreplicationManager urLedgerMgr;
+    private ZkLedgerUnderreplicationManager urLedgerMgr;
     private Set<Long> urLedgerList;
 
     private List<Long> ledgerList;
@@ -218,41 +219,31 @@ public class AuditorLedgerCheckerTest extends MultiLedgerManagerTestCase {
     @Test(timeout=60000)
     public void testMultipleBookieFailures() throws Exception {
         LedgerHandle lh1 = createAndAddEntriesToLedger();
-        ledgerList.add(lh1.getId());
-        LedgerHandle lh2 = createAndAddEntriesToLedger();
-        ledgerList.add(lh2.getId());
-        LOG.debug("Created following ledgers : " + ledgerList);
 
         // failing first bookie
         shutdownBookie(bs.size() - 1);
+
         // simulate re-replication
-        doLedgerRereplication(lh1.getId(), lh2.getId());
+        doLedgerRereplication(lh1.getId());
 
         // failing another bookie
-        CountDownLatch underReplicaLatch = registerUrLedgerWatcher(ledgerList
-                .size());
         String shutdownBookie = shutdownBookie(bs.size() - 1);
 
         // grace period for publishing the bk-ledger
         LOG.debug("Waiting for ledgers to be marked as under replicated");
-        underReplicaLatch.await(5, TimeUnit.SECONDS);
-        Map<Long, String> urLedgerData = getUrLedgerData(urLedgerList);
 
-        assertEquals("Missed identifying under replicated ledgers", 2,
-                urLedgerList.size());
-
-        /*
-         * Sample data format present in the under replicated ledger path
-         * {4=replica: "10.18.89.153:5002", 5=replica: "10.18.89.153:5003"}
-         */
-        for (Long ledgerId : ledgerList) {
-            assertTrue("Ledger is not marked as underreplicated:" + ledgerId,
-                    urLedgerList.contains(ledgerId));
-            String data = urLedgerData.get(ledgerId);
-            assertTrue("Bookie " + shutdownBookie
-                    + " is not listed in the ledger as missing " + data, data
-                    .contains(shutdownBookie));
+        for (int i = 0; i < 10; i++) {
+            try {
+                UnderreplicatedLedgerFormat data = urLedgerMgr.getLedgerUnreplicationInfo(lh1.getId());
+                if (data.getReplicaList().contains(shutdownBookie)) {
+                    return;
+                }
+            } catch (Exception e) {
+                // may not find node
+            }
+            Thread.sleep(1000);
         }
+        fail("Didn't get marked as underreplicated");
     }
 
     @Test(timeout = 30000)
