@@ -171,46 +171,18 @@ public class AuditorLedgerCheckerTest extends MultiLedgerManagerTestCase {
     @Test(timeout=60000)
     public void testRestartBookie() throws Exception {
         LedgerHandle lh1 = createAndAddEntriesToLedger();
-        ledgerList.add(lh1.getId());
         LedgerHandle lh2 = createAndAddEntriesToLedger();
-        ledgerList.add(lh2.getId());
-        LOG.debug("Created following ledgers : " + ledgerList);
-
-        // 2 is added to the latch, since after the ledger reformation, again
-        // the reformed bookie is stopped. So auditor will modify the zk
-        // underreplicated metadata
-        int count = ledgerList.size() + 2;
-        final CountDownLatch underReplicaLatch = registerUrLedgerWatcher(count);
+        LOG.debug("Created following ledgers : {}, {}", lh1, lh2);
 
         int bkShutdownIndex = bs.size() - 1;
         ServerConfiguration bookieConf1 = bsConfs.get(bkShutdownIndex);
         String shutdownBookie = shutdownBookie(bkShutdownIndex);
 
-        // restart the failed bookie and simulate previously listed ledgers are
-        // rereplicated
+        // restart the failed bookie
         bs.add(startBookie(bookieConf1));
 
-        // grace period for publishing the bk-ledger
-        LOG.debug("Waiting for ledgers to be marked as under replicated");
-        underReplicaLatch.await(5, TimeUnit.SECONDS);
-        Map<Long, String> urLedgerData = getUrLedgerData(urLedgerList);
-
-        assertEquals("Missed identifying under replicated ledgers", 2,
-                urLedgerList.size());
-
-        /*
-         * Sample data format present in the under replicated ledger path
-         * 
-         * {4=replica: "10.18.89.153:5002", 5=replica: "10.18.89.153:5003"}
-         */
-        for (Long ledgerId : ledgerList) {
-            assertTrue("Ledger is not marked as underreplicated:" + ledgerId,
-                    urLedgerList.contains(ledgerId));
-            String data = urLedgerData.get(ledgerId);
-            assertTrue("Bookie " + shutdownBookie
-                    + " is not listed in the ledger as missing " + data, data
-                    .contains(shutdownBookie));
-        }
+        waitForLedgerMissingReplicas(lh1.getId(), 10, shutdownBookie);
+        waitForLedgerMissingReplicas(lh2.getId(), 10, shutdownBookie);
     }
 
     /**
@@ -232,19 +204,8 @@ public class AuditorLedgerCheckerTest extends MultiLedgerManagerTestCase {
 
         // grace period for publishing the bk-ledger
         LOG.debug("Waiting for ledgers to be marked as under replicated");
-
-        for (int i = 0; i < 10; i++) {
-            try {
-                UnderreplicatedLedgerFormat data = urLedgerMgr.getLedgerUnreplicationInfo(lh1.getId());
-                if (data.getReplicaList().contains(shutdownBookie)) {
-                    return;
-                }
-            } catch (Exception e) {
-                // may not find node
-            }
-            Thread.sleep(1000);
-        }
-        fail("Didn't get marked as underreplicated");
+        assertTrue("Ledger should be missing second replica",
+                   waitForLedgerMissingReplicas(lh1.getId(), 10, shutdownBookie));
     }
 
     @Test(timeout = 30000)
@@ -313,6 +274,29 @@ public class AuditorLedgerCheckerTest extends MultiLedgerManagerTestCase {
         // grace period for publishing the bk-ledger
         LOG.debug("Waiting for Auditor to finish ledger check.");
         assertFalse("latch should not have completed", underReplicaLatch.await(5, TimeUnit.SECONDS));
+    }
+
+    /**
+     * Wait for ledger to be underreplicated, and to be missing all replicas specified
+     */
+    private boolean waitForLedgerMissingReplicas(Long ledgerId, long secondsToWait, String... replicas)
+            throws Exception {
+        for (int i = 0; i < secondsToWait; i++) {
+            try {
+                UnderreplicatedLedgerFormat data = urLedgerMgr.getLedgerUnreplicationInfo(ledgerId);
+                boolean all = true;
+                for (String r : replicas) {
+                    all = all && data.getReplicaList().contains(r);
+                }
+                if (all) {
+                    return true;
+                }
+            } catch (Exception e) {
+                // may not find node
+            }
+            Thread.sleep(1000);
+        }
+        return false;
     }
 
     private CountDownLatch registerUrLedgerWatcher(int count)
