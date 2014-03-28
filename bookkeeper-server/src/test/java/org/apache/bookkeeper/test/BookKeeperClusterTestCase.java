@@ -43,6 +43,9 @@ import org.apache.bookkeeper.conf.ClientConfiguration;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.metastore.InMemoryMetaStore;
 import org.apache.bookkeeper.proto.BookieServer;
+import org.apache.bookkeeper.stats.StatsLogger;
+import org.apache.bookkeeper.stats.NullStatsLogger;
+
 import org.apache.bookkeeper.replication.AutoRecoveryMain;
 import org.apache.bookkeeper.replication.Auditor;
 import org.apache.bookkeeper.replication.ReplicationException.CompatibilityException;
@@ -442,7 +445,7 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
             throws Exception {
         BookieServer server = new BookieServer(conf) {
             @Override
-            protected Bookie newBookie(ServerConfiguration conf) {
+            protected Bookie newBookie(ServerConfiguration conf, StatsLogger stats) {
                 return b;
             }
         };
@@ -496,7 +499,8 @@ public abstract class BookKeeperClusterTestCase extends TestCase {
     private void startAutoRecovery(BookieServer bserver,
                                    ServerConfiguration conf) throws Exception {
         if (isAutoRecoveryEnabled()) {
-            AutoRecoveryMain autoRecoveryProcess = new AutoRecoveryMain(conf);
+            AutoRecoveryMain autoRecoveryProcess = new AutoRecoveryMain(conf,
+                                                                        NullStatsLogger.INSTANCE);
             autoRecoveryProcess.start();
             autoRecoveryProcesses.put(bserver, autoRecoveryProcess);
             LOG.debug("Starting Auditor Recovery for the bookie:"

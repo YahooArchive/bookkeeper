@@ -22,6 +22,7 @@ package org.apache.bookkeeper.replication;
 
 import java.util.concurrent.CountDownLatch;
 import org.apache.bookkeeper.test.BookKeeperClusterTestCase;
+import org.apache.bookkeeper.stats.NullStatsLogger;
 
 import org.junit.Test;
 
@@ -39,7 +40,7 @@ public class AutoRecoveryMainTest extends BookKeeperClusterTestCase {
      */
     @Test(timeout=60000)
     public void testStartup() throws Exception {
-        AutoRecoveryMain main = new AutoRecoveryMain(bsConfs.get(0));
+        AutoRecoveryMain main = new AutoRecoveryMain(bsConfs.get(0), NullStatsLogger.INSTANCE);
         try {
             main.start();
             Thread.sleep(500);
@@ -57,7 +58,7 @@ public class AutoRecoveryMainTest extends BookKeeperClusterTestCase {
      */
     @Test(timeout=60000)
     public void testShutdown() throws Exception {
-        AutoRecoveryMain main = new AutoRecoveryMain(bsConfs.get(0));
+        AutoRecoveryMain main = new AutoRecoveryMain(bsConfs.get(0), NullStatsLogger.INSTANCE);
         main.start();
         Thread.sleep(500);
         assertTrue("AuditorElector should be running",
@@ -78,8 +79,8 @@ public class AutoRecoveryMainTest extends BookKeeperClusterTestCase {
      */
     @Test(timeout=60000)
     public void testAutoRecoverySessionLoss() throws Exception {
-        AutoRecoveryMain main1 = new AutoRecoveryMain(bsConfs.get(0));
-        AutoRecoveryMain main2 = new AutoRecoveryMain(bsConfs.get(1));
+        AutoRecoveryMain main1 = new AutoRecoveryMain(bsConfs.get(0), NullStatsLogger.INSTANCE);
+        AutoRecoveryMain main2 = new AutoRecoveryMain(bsConfs.get(1), NullStatsLogger.INSTANCE);
         main1.start();
         main2.start();
         Thread.sleep(500);

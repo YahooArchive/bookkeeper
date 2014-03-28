@@ -66,6 +66,10 @@ import org.apache.zookeeper.ZooKeeper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.bookkeeper.stats.StatsLogger;
+import org.apache.bookkeeper.stats.OpStatsLogger;
+import org.apache.bookkeeper.stats.NullStatsLogger;
+
 import com.google.common.annotations.VisibleForTesting;
 
 /**
@@ -109,6 +113,8 @@ public class Bookie extends Thread {
     // jmx related beans
     BookieBean jmxBookieBean;
     BKMBeanInfo jmxLedgerStorageBean;
+
+    StatsLogger stats;
 
     Map<Long, byte[]> masterKeyCache = Collections.synchronizedMap(new HashMap<Long, byte[]>());
 
@@ -264,10 +270,17 @@ public class Bookie extends Thread {
         volatile boolean running = true;
         // flag to ensure sync thread will not be interrupted during flush
         final AtomicBoolean flushing = new AtomicBoolean(false);
+
         // make flush interval as a parameter
         final int flushInterval;
-        public SyncThread(ServerConfiguration conf) {
+        final StatsLogger stats;
+        final OpStatsLogger flushOpStats;
+
+        public SyncThread(ServerConfiguration conf, StatsLogger stats) {
             super("SyncThread");
+            this.stats = stats.scope("sync-thread");
+            flushOpStats = this.stats.getOpStatsLogger("flush-op");
+
             flushInterval = conf.getFlushInterval();
             LOG.debug("Flush Interval : {}", flushInterval);
         }
@@ -535,8 +548,12 @@ public class Bookie extends Thread {
         return currentDirs;
     }
 
-
     public Bookie(ServerConfiguration conf)
+            throws IOException, KeeperException, InterruptedException, BookieException {
+        this(conf, NullStatsLogger.INSTANCE);
+    }
+
+    public Bookie(ServerConfiguration conf, StatsLogger stats)
             throws IOException, KeeperException, InterruptedException, BookieException {
         super("Bookie-" + conf.getBookiePort());
         this.bookieRegistrationPath = conf.getZkAvailableBookiesPath() + "/";
@@ -545,11 +562,12 @@ public class Bookie extends Thread {
         this.ledgerDirsManager = new LedgerDirsManager(conf);
         // instantiate zookeeper client to initialize ledger manager
         this.zk = instantiateZookeeperClient(conf);
+        this.stats = stats;
         checkEnvironment(this.zk);
         ledgerManagerFactory = LedgerManagerFactory.newLedgerManagerFactory(conf, this.zk);
         LOG.info("instantiate ledger manager {}", ledgerManagerFactory.getClass().getName());
         ledgerManager = ledgerManagerFactory.newLedgerManager();
-        syncThread = new SyncThread(conf);
+        syncThread = new SyncThread(conf, stats);
 
         String ledgerStorageClass = conf.getLedgerStorageClass();
         LOG.info("using ledger storage: {}", ledgerStorageClass);
@@ -558,7 +576,7 @@ public class Bookie extends Thread {
 
         handles = new HandleFactoryImpl(ledgerStorage);
         // instantiate the journal
-        journal = new Journal(conf, ledgerDirsManager);
+        journal = new Journal(conf, ledgerDirsManager, stats);
 
         // ZK ephemeral node for this Bookie.
         zkBookieRegPath = this.bookieRegistrationPath + getMyId();
@@ -1237,7 +1255,7 @@ public class Bookie extends Thread {
      */
     public static void main(String[] args) 
             throws IOException, InterruptedException, BookieException, KeeperException {
-        Bookie b = new Bookie(new ServerConfiguration());
+        Bookie b = new Bookie(new ServerConfiguration(), NullStatsLogger.INSTANCE);
         b.start();
         CounterCallback cb = new CounterCallback();
         long start = MathUtils.now();

@@ -56,6 +56,12 @@ import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.bookkeeper.stats.Stats;
+import org.apache.bookkeeper.stats.StatsProvider;
+import org.apache.bookkeeper.stats.StatsLogger;
+import org.apache.bookkeeper.stats.Counter;
+import org.apache.bookkeeper.stats.OpStatsLogger;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.protobuf.ByteString;
 
@@ -73,6 +79,11 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
 
     // operation stats
     final BKStats bkStats = BKStats.getInstance();
+    final StatsLogger stats;
+    final OpStatsLogger addOpStats;
+    final OpStatsLogger readOpStats;
+    final Counter fenceStats;
+
     final boolean isStatsEnabled;
     protected BookieServerBean jmxBkServerBean;
     AutoRecoveryMain autoRecoveryMain = null;
@@ -82,21 +93,32 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
             KeeperException, InterruptedException, BookieException,
             UnavailableException, CompatibilityException {
         this.conf = conf;
-        this.bookie = newBookie(conf);
+
+        Stats.loadStatsProvider(conf);
+        StatsProvider statsProvider = Stats.get();
+        statsProvider.start(conf);
+
+        stats = statsProvider.getStatsLogger("bookie");
+        addOpStats = stats.getOpStatsLogger("add-op");
+        readOpStats = stats.getOpStatsLogger("read-op");
+        fenceStats = stats.getCounter("fence-op");
+
+        this.bookie = newBookie(conf, stats);
         isAutoRecoveryDaemonEnabled = conf.isAutoRecoveryDaemonEnabled();
         if (isAutoRecoveryDaemonEnabled) {
-            this.autoRecoveryMain = new AutoRecoveryMain(conf);
+            this.autoRecoveryMain = new AutoRecoveryMain(conf, stats);
         }
         isStatsEnabled = conf.isStatisticsEnabled();
+
     }
 
-    protected Bookie newBookie(ServerConfiguration conf)
+    protected Bookie newBookie(ServerConfiguration conf, StatsLogger stats)
         throws IOException, KeeperException, InterruptedException, BookieException {
-        return new Bookie(conf);
+        return new Bookie(conf, stats);
     }
 
     public void start() throws IOException, UnavailableException {
-        nioServerFactory = new NIOServerFactory(conf, this);
+        nioServerFactory = new NIOServerFactory(conf, stats, this);
 
         this.bookie.start();
         // fail fast, when bookie startup is not successful
@@ -433,10 +455,7 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
 
         boolean success = false;
         int statType = BKStats.STATS_UNKNOWN;
-        long startTime = 0;
-        if (isStatsEnabled) {
-            startTime = MathUtils.now();
-        }
+        long startTime = MathUtils.now();
 
         // packet format is different between ADDENTRY and READENTRY
         long ledgerId = -1;
@@ -533,6 +552,7 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
                         packet.get(masterKey, 0, BookieProtocol.MASTER_KEY_LENGTH);
 
                         fenceResult = bookie.fenceLedger(ledgerId, masterKey);
+                        fenceStats.inc();
                     } else {
                         LOG.error("Password not provided, Not safe to fence {}", ledgerId);
                         throw BookieException.create(BookieException.Code.UnauthorizedAccessException);
@@ -628,6 +648,12 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
                 LOG.debug("Sending response for: {}, length: {}", entryId, rsp[1].remaining());
             }
             src.sendResponse(rsp);
+
+            if (success) {
+                readOpStats.registerSuccessfulEvent(MathUtils.now()-startTime);
+            } else {
+                readOpStats.registerFailedEvent(MathUtils.now()-startTime);
+            }
             break;
 
         case BookieProtocol.TRIM:
@@ -684,6 +710,11 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
             LOG.trace("Add entry rc = " + rc + " for " + entryId + "@" + ledgerId);
         }
         src.sendResponse(new ByteBuffer[] { bb });
+        if (rc == BKException.Code.OK) {
+            addOpStats.registerSuccessfulEvent(MathUtils.now()-startTime);
+        } else {
+            addOpStats.registerFailedEvent(MathUtils.now()-startTime);
+        }
         if (isStatsEnabled) {
             // compute the latency
             if (0 == rc) {

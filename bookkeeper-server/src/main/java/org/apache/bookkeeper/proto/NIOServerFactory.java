@@ -35,6 +35,7 @@ import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.auth.AuthProviderFactoryFactory;
 import org.apache.bookkeeper.auth.BookieAuthProvider;
 import org.apache.bookkeeper.bookie.Bookie;
@@ -81,7 +82,7 @@ public class NIOServerFactory extends Thread {
     long minLatency = 99999999;
 
     ServerConfiguration conf;
-
+    final StatsLogger niostats;
     private AtomicBoolean crashed = new AtomicBoolean(false);
     private Object suspensionLock = new Object();
     private boolean suspended = false;
@@ -89,11 +90,12 @@ public class NIOServerFactory extends Thread {
     final ExtensionRegistry extRegistry;
     final BookieAuthProvider.Factory authProviderFactory;
 
-    public NIOServerFactory(ServerConfiguration conf, PacketProcessor processor) throws IOException {
+    public NIOServerFactory(ServerConfiguration conf, StatsLogger stats, PacketProcessor processor) throws IOException {
         super("NIOServerFactory-" + conf.getBookiePort());
         setDaemon(true);
         this.processor = processor;
         this.conf = conf;
+        niostats = stats.scope("nio");
 
         extRegistry = ExtensionRegistry.newInstance();
         authProviderFactory = AuthProviderFactoryFactory.newBookieAuthProviderFactory(conf, extRegistry);

@@ -49,6 +49,7 @@ import org.apache.bookkeeper.client.BookiesListener;
 import org.apache.bookkeeper.util.StringUtils;
 
 import org.apache.bookkeeper.util.ZkUtils;
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
 
 import org.apache.bookkeeper.conf.ServerConfiguration;
@@ -66,7 +67,6 @@ import com.google.common.collect.Sets;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.SettableFuture;
 import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.AsyncCallback;
 import org.slf4j.Logger;
@@ -90,10 +90,13 @@ public class Auditor implements BookiesListener {
     private final ScheduledExecutorService executor;
     private List<String> knownBookies = new ArrayList<String>();
 
+    private final StatsLogger stats;
+
     public Auditor(final String bookieIdentifier, ServerConfiguration conf,
-                   ZooKeeper zkc) throws UnavailableException {
+                   ZooKeeper zkc, StatsLogger stats) throws UnavailableException {
         this.conf = conf;
         initialize(conf, zkc);
+        this.stats = stats;
 
         executor = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
                 @Override
@@ -176,8 +179,8 @@ public class Auditor implements BookiesListener {
 
                         if (lostBookies.size() > 0) {
                             knownBookies.removeAll(lostBookies);
-                            Map<String, Set<Long>> ledgerDetails = generateBookie2LedgersIndex();
-                            handleLostBookies(lostBookies, ledgerDetails);
+
+                            auditBookies();
                         }
                     } catch (BKException bke) {
                         LOG.error("Exception getting bookie list", bke);
@@ -188,6 +191,8 @@ public class Auditor implements BookiesListener {
                         LOG.error("Exception while watching available bookies", bke);
                     } catch (UnavailableException ue) {
                         LOG.error("Exception while watching available bookies", ue);
+                    } catch (KeeperException ke) {
+                        LOG.error("Exception reading bookie list", ke);
                     }
                 }
             });
@@ -236,14 +241,18 @@ public class Auditor implements BookiesListener {
             } else {
                 LOG.info("Periodic checking disabled");
             }
-
+            try {
+                knownBookies = getAvailableBookies();
+            } catch (BKException bke) {
+                LOG.error("Couldn't get bookie list, exiting", bke);
+                submitShutdownTask();
+            }
             Runnable bookieCheck = new Runnable() {
                     public void run() {
                         try {
-                            knownBookies = getAvailableBookies();
-                            auditingBookies(knownBookies);
+                            auditBookies();
                         } catch (BKException bke) {
-                            LOG.error("Exception getting bookie list", bke);
+                            LOG.error("Couldn't get bookie list, exiting", bke);
                             submitShutdownTask();
                         } catch (KeeperException ke) {
                             LOG.error("Exception while watching available bookies", ke);
@@ -293,11 +302,21 @@ public class Auditor implements BookiesListener {
         return availableBookies;
     }
 
-    private void auditingBookies(List<String> availableBookies)
-            throws BKAuditException, KeeperException, InterruptedException {
-
+    private void auditBookies()
+            throws BKAuditException, KeeperException,
+            InterruptedException, BKException {
+        // put exit cases here
         Map<String, Set<Long>> ledgerDetails = generateBookie2LedgersIndex();
 
+        try {
+            waitIfLedgerReplicationDisabled();
+        } catch (UnavailableException ue) {
+            LOG.error("Underreplication unavailable, skipping audit."
+                      + "Will retry after a period");
+            return;
+        }
+
+        List<String> availableBookies = getAvailableBookies();
         // find lost bookies
         Set<String> knownBookies = ledgerDetails.keySet();
         Collection<String> lostBookies = CollectionUtils.subtract(knownBookies,

@@ -37,6 +37,8 @@ import org.apache.bookkeeper.conf.ClientConfiguration;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.WriteCallback;
+import org.apache.bookkeeper.stats.NullStatsLogger;
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.util.OrderedSafeExecutor;
 import org.apache.bookkeeper.util.SafeRunnable;
 import org.jboss.netty.buffer.ChannelBuffer;
@@ -58,17 +60,24 @@ public class BookieClient {
     // This is global state that should be across all BookieClients
     AtomicLong totalBytesOutstanding = new AtomicLong();
 
-    OrderedSafeExecutor executor;
-    ClientSocketChannelFactory channelFactory;
-    ConcurrentHashMap<InetSocketAddress, PerChannelBookieClient> channels = new ConcurrentHashMap<InetSocketAddress, PerChannelBookieClient>();
+    final OrderedSafeExecutor executor;
+    final ClientSocketChannelFactory channelFactory;
+    final ConcurrentHashMap<InetSocketAddress, PerChannelBookieClient> channels =
+        new ConcurrentHashMap<InetSocketAddress, PerChannelBookieClient>();
+    private final ClientConfiguration conf;
+    private volatile boolean closed;
+    private final ReentrantReadWriteLock closeLock;
+    private final StatsLogger statsLogger;
+
     final private ClientAuthProvider.Factory authProviderFactory;
     final private ExtensionRegistry registry;
 
-    private final ClientConfiguration conf;
-    private volatile boolean closed;
-    private ReentrantReadWriteLock closeLock;
-
     public BookieClient(ClientConfiguration conf, ClientSocketChannelFactory channelFactory, OrderedSafeExecutor executor) throws IOException {
+        this(conf, channelFactory, executor, NullStatsLogger.INSTANCE);
+    }
+
+    public BookieClient(ClientConfiguration conf, ClientSocketChannelFactory channelFactory, OrderedSafeExecutor executor,
+                        StatsLogger statsLogger) throws IOException {
         this.conf = conf;
         this.channelFactory = channelFactory;
         this.executor = executor;
@@ -77,6 +86,7 @@ public class BookieClient {
 
         this.registry = ExtensionRegistry.newInstance();
         this.authProviderFactory = AuthProviderFactoryFactory.newClientAuthProviderFactory(conf, registry);
+        this.statsLogger = statsLogger;
     }
 
     public PerChannelBookieClient lookupClient(InetSocketAddress addr) {
@@ -89,7 +99,7 @@ public class BookieClient {
                     return null;
                 }
                 channel = new PerChannelBookieClient(conf, executor, channelFactory, addr, totalBytesOutstanding,
-                        authProviderFactory, registry);
+                                                     statsLogger, authProviderFactory, registry);
                 PerChannelBookieClient prevChannel = channels.putIfAbsent(addr, channel);
                 if (prevChannel != null) {
                     channel = prevChannel;

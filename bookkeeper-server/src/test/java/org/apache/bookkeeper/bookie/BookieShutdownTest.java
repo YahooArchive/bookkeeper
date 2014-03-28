@@ -23,6 +23,7 @@ package org.apache.bookkeeper.bookie;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.test.BookKeeperClusterTestCase;
 import org.apache.bookkeeper.client.LedgerHandle;
@@ -92,7 +93,8 @@ public class BookieShutdownTest extends BookKeeperClusterTestCase {
         final CountDownLatch shutdownComplete = new CountDownLatch(1);
         // simulating ZooKeeper exception by assigning a closed zk client to bk
         BookieServer bkServer = new BookieServer(conf) {
-            protected Bookie newBookie(ServerConfiguration conf)
+            @Override
+            protected Bookie newBookie(ServerConfiguration conf, StatsLogger stats)
                     throws IOException, KeeperException, InterruptedException,
                     BookieException {
                 return new Bookie(conf) {

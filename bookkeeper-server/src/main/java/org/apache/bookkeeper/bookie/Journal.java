@@ -37,6 +37,10 @@ import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.WriteCallback;
 import org.apache.bookkeeper.util.IOUtils;
 import org.apache.bookkeeper.util.MathUtils;
+
+import org.apache.bookkeeper.stats.StatsLogger;
+import org.apache.bookkeeper.stats.OpStatsLogger;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -233,6 +237,7 @@ class Journal extends Thread {
             this.ctx = ctx;
             this.ledgerId = ledgerId;
             this.entryId = entryId;
+            this.enqueueTime = MathUtils.now();
         }
 
         ByteBuffer entry;
@@ -244,6 +249,7 @@ class Journal extends Thread {
         WriteCallback cb;
 
         Object ctx;
+        final long enqueueTime;
     }
 
     final static long MB = 1024 * 1024L;
@@ -262,14 +268,18 @@ class Journal extends Thread {
 
     volatile boolean running = true;
     private LedgerDirsManager ledgerDirsManager;
+    final StatsLogger stats;
+    final OpStatsLogger journalAddStats;
 
-    public Journal(ServerConfiguration conf, LedgerDirsManager ledgerDirsManager) {
+    public Journal(ServerConfiguration conf, LedgerDirsManager ledgerDirsManager, StatsLogger stats) {
         super("BookieJournal-" + conf.getBookiePort());
         this.ledgerDirsManager = ledgerDirsManager;
         this.conf = conf;
         this.journalDirectory = Bookie.getCurrentDirectory(conf.getJournalDir());
         this.maxJournalSize = conf.getMaxJournalSize() * MB;
         this.maxBackupJournals = conf.getMaxBackupJournals();
+        this.stats = stats.scope("journal");
+        journalAddStats = this.stats.getOpStatsLogger("add-op");
 
         // read last log mark
         lastLogMark.readLog();
@@ -506,10 +516,14 @@ class Journal extends Thread {
                             //logFile.force(false);
                             bc.flush(true);
                             lastFlushPosition = bc.position();
+
                             lastLogMark.setLastLogMark(logId, lastFlushPosition);
+                            long now = MathUtils.now();
+
                             for (QueueEntry e : toFlush) {
                                 e.cb.writeComplete(BookieException.Code.OK,
                                                    e.ledgerId, e.entryId, null, e.ctx);
+                                journalAddStats.registerSuccessfulEvent(now - e.enqueueTime);
                             }
                             toFlush.clear();
 

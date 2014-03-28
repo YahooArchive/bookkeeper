@@ -25,6 +25,7 @@ import java.net.Socket;
 import java.nio.ByteBuffer;
 
 import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.proto.NIOServerFactory;
 import org.apache.bookkeeper.proto.NIOServerFactory.Cnxn;
 import org.apache.bookkeeper.proto.NIOServerFactory.PacketProcessor;
@@ -49,7 +50,8 @@ public class NIOServerFactoryTest extends TestCase {
         ServerConfiguration conf = new ServerConfiguration();
         int port = PortManager.nextFreePort();
         conf.setBookiePort(port);
-        NIOServerFactory factory = new NIOServerFactory(conf, problemProcessor);
+        NIOServerFactory factory = new NIOServerFactory(conf, NullStatsLogger.INSTANCE,
+                                                        problemProcessor);
         factory.start();
         Socket s = new Socket("127.0.0.1", port);
         s.setSoTimeout(5000);
