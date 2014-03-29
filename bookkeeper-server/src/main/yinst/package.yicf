@@ -1,6 +1,6 @@
 
 PRODUCT_NAME = cloud_messaging_bookkeeper
-UPSTREAM_VERSION = 4.2.1
+UPSTREAM_VERSION = 4.2.2
 
 MVN_VERSION = `grep "<version>" pom.xml | head -1 | sed -r 's/(<[^>\n]*>)//g' | sed -e 's/^[ \t]*//' `
 LAST_DIST_VERSION=`yinst packages -all cloud_messaging_bookkeeper | awk '{print $1}' | awk -F- '{print $2}' | grep ^$(UPSTREAM_VERSION) | tail -1`
@@ -21,6 +21,8 @@ GROUP = wheel
 PERM = 0444
 
 file - - - lib/jars/bookkeeper-server.jar target/bookkeeper-server-$(MVN_VERSION).jar
+file - - - lib/jars/bookkeeper-bookkeeper-stats-api.jar ../bookkeeper-stats/target/bookkeeper-stats-api-$(MVN_VERSION).jar
+file - - - lib/jars/bookkeeper-codahale-metrics-provider.jar ../bookkeeper-stats-providers/codahale-metrics-provider/target/codahale-metrics-provider-$(MVN_VERSION).jar
 file - - - lib/jars/bookkeeper-server-sources.jar target/bookkeeper-server-$(MVN_VERSION)-sources.jar
 file - - - lib/jars/bookkeeper-server-tests.jar target/bookkeeper-server-$(MVN_VERSION)-tests.jar
 file - - - lib/jars/bookkeeper-server.pom pom.xml
