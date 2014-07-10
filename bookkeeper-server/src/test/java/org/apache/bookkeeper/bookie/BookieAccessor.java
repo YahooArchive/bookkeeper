@@ -21,6 +21,7 @@
 package org.apache.bookkeeper.bookie;
 
 import java.io.IOException;
+import java.util.concurrent.Future;
 
 /**
  * Accessor class to avoid making Bookie internals public
@@ -31,5 +32,13 @@ public class BookieAccessor {
      */
     public static void forceFlush(Bookie b) throws IOException {
         b.ledgerStorage.flush();
+    }
+
+    public static Future<?> triggerGC(Bookie b) {
+        return ((InterleavedLedgerStorage)b.ledgerStorage).gcThread.triggerGC();
+    }
+
+    public static boolean ledgerExists(Bookie b, long ledgerId) throws IOException {
+        return b.ledgerStorage.ledgerExists(ledgerId);
     }
 }
