@@ -21,6 +21,7 @@
 package org.apache.bookkeeper.bookie;
 
 import java.io.IOException;
+import java.util.concurrent.Future;
 
 import org.apache.bookkeeper.bookie.CheckpointSource.Checkpoint;
 
@@ -35,5 +36,13 @@ public class BookieAccessor {
         Checkpoint cp = b.journal.newCheckpoint();
         b.ledgerStorage.flush();
         b.journal.checkpointComplete(cp, true);
+    }
+
+    public static Future<?> triggerGC(Bookie b) {
+        return ((InterleavedLedgerStorage)b.ledgerStorage).gcThread.triggerGC();
+    }
+
+    public static boolean ledgerExists(Bookie b, long ledgerId) throws IOException {
+        return b.ledgerStorage.ledgerExists(ledgerId);
     }
 }
