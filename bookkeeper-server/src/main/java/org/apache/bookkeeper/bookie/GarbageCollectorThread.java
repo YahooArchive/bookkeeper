@@ -630,11 +630,7 @@ public class GarbageCollectorThread extends Thread {
         EntryLogMetadata entryLogMeta = new EntryLogMetadata(entryLogId);
         ExtractionScanner scanner = new ExtractionScanner(entryLogMeta);
         // Read through the entry log file and extract the entry log meta
-        try {
-            entryLogger.scanEntryLog(entryLogId, scanner);
-        } catch (IOException e) {
-            LOG.warn("Error while scanning the entry log {}", entryLogId, e);
-        }
+        entryLogger.scanEntryLog(entryLogId, scanner);
         LOG.debug("Retrieved entry log meta data entryLogId: {}, meta: {}",
                   entryLogId, entryLogMeta);
         return entryLogMeta;
