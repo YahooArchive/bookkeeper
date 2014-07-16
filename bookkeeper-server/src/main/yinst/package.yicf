@@ -16,6 +16,8 @@ PACKAGE_OS_SPECIFIC = no
 YINST bug-product Cloud Messaging Service
 YINST bug-component General
 
+#YMAVEN_TRANSITIVE_ENABLED
+
 OWNER = root
 GROUP = wheel
 PERM = 0444
