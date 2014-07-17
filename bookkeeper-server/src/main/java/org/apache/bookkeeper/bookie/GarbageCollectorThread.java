@@ -21,6 +21,11 @@
 
 package org.apache.bookkeeper.bookie;
 
+
+
+import com.google.common.util.concurrent.RateLimiter;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -28,25 +33,27 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import org.apache.bookkeeper.bookie.EntryLogger.EntryLogScanner;
 import org.apache.bookkeeper.bookie.GarbageCollector.GarbageCleaner;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.meta.LedgerManager;
+import org.apache.bookkeeper.meta.LedgerManagerFactory;
 import org.apache.bookkeeper.util.MathUtils;
 import org.apache.bookkeeper.util.SafeRunnable;
+import org.apache.zookeeper.ZooKeeper;
+import org.apache.zookeeper.KeeperException;
+import org.apache.bookkeeper.util.ZkUtils;
+import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.google.common.util.concurrent.RateLimiter;
 
 /**
  * This is the garbage collector thread that runs in the background to
@@ -82,7 +89,9 @@ public class GarbageCollectorThread extends SafeRunnable {
 
     // Entry Logger Handle
     final EntryLogger entryLogger;
+    final LedgerManagerProvider ledgerManagerProvider;
 
+    final ServerConfiguration conf;
     final CompactableLedgerStorage ledgerStorage;
 
     // flag to ensure gc thread will not be interrupted during compaction
@@ -94,7 +103,6 @@ public class GarbageCollectorThread extends SafeRunnable {
     // track the last scanned successfully log id
     long scannedLogId = 0;
 
-    final GarbageCollector garbageCollector;
     final GarbageCleaner garbageCleaner;
 
     /**
@@ -224,7 +232,7 @@ public class GarbageCollectorThread extends SafeRunnable {
      * @throws IOException
      */
     public GarbageCollectorThread(ServerConfiguration conf,
-                                  LedgerManager ledgerManager,
+                                  LedgerManagerProvider ledgerManagerProvider,
                                   final CompactableLedgerStorage ledgerStorage)
         throws IOException {
         gcExecutor = Executors.newSingleThreadScheduledExecutor(
@@ -232,6 +240,8 @@ public class GarbageCollectorThread extends SafeRunnable {
 
         this.entryLogger = ledgerStorage.getEntryLogger();
         this.ledgerStorage = ledgerStorage;
+        this.ledgerManagerProvider = ledgerManagerProvider;
+        this.conf = conf;
 
         this.gcWaitTime = conf.getGcWaitTime();
         this.maxOutstandingRequests = conf.getCompactionMaxOutstandingRequests();
@@ -253,8 +263,6 @@ public class GarbageCollectorThread extends SafeRunnable {
                 }
             }
         };
-
-        this.garbageCollector = new ScanAndCompareGarbageCollector(ledgerManager, ledgerStorage);
 
         // compaction parameters
         minorCompactionThreshold = conf.getMinorCompactionThreshold();
@@ -324,39 +332,50 @@ public class GarbageCollectorThread extends SafeRunnable {
         // (except for the current new one which is still being written to).
         entryLogMetaMap = extractMetaFromEntryLogs(entryLogMetaMap);
 
-        // gc inactive/deleted ledgers
-        doGcLedgers();
+        try {
+            // gc inactive/deleted ledgers
+            GarbageCollector collector = new ScanAndCompareGarbageCollector(
+                ledgerManagerProvider.getLedgerManager(), ledgerStorage);
 
-        // gc entry logs
-        doGcEntryLogs();
+            collector.gc(garbageCleaner);
 
-        long curTime = MathUtils.now();
-        if (enableMajorCompaction &&
-            curTime - lastMajorCompactionTime > majorCompactionInterval) {
-            // enter major compaction
-            LOG.info("Enter major compaction");
-            doCompactEntryLogs(majorCompactionThreshold);
-            lastMajorCompactionTime = MathUtils.now();
-            // also move minor compaction time
-            lastMinorCompactionTime = lastMajorCompactionTime;
-            return;
-        }
+            // gc entry logs
+            doGcEntryLogs();
 
-        if (enableMinorCompaction &&
-            curTime - lastMinorCompactionTime > minorCompactionInterval) {
-            // enter minor compaction
-            LOG.info("Enter minor compaction");
-            doCompactEntryLogs(minorCompactionThreshold);
-            lastMinorCompactionTime = MathUtils.now();
+            long curTime = MathUtils.now();
+            if (enableMajorCompaction &&
+                curTime - lastMajorCompactionTime > majorCompactionInterval) {
+                // enter major compaction
+                LOG.info("Enter major compaction");
+                doCompactEntryLogs(majorCompactionThreshold);
+                lastMajorCompactionTime = MathUtils.now();
+                // also move minor compaction time
+                lastMinorCompactionTime = lastMajorCompactionTime;
+            }
+
+            if (enableMinorCompaction &&
+                curTime - lastMinorCompactionTime > minorCompactionInterval) {
+                // enter minor compaction
+                LOG.info("Enter minor compaction");
+                doCompactEntryLogs(minorCompactionThreshold);
+                lastMinorCompactionTime = MathUtils.now();
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            LOG.info("Garbage collection interrupted", ie);
+        } catch (Exception e) {
+            LOG.warn("Exception in gc", e);
+        } finally {
+            try {
+                ledgerManagerProvider.releaseResources();
+            } catch (IOException ioe) {
+                LOG.warn("Error cleaning up ledger manager resources", ioe);
+            } catch (InterruptedException ie) {
+                LOG.warn("Interrupted cleaning up ledger manager resources", ie);
+            }
         }
     }
 
-    /**
-     * Do garbage collection ledger index files
-     */
-    private void doGcLedgers() {
-        garbageCollector.gc(garbageCleaner);
-    }
 
     /**
      * Garbage collect those entry loggers which are not associated with any active ledgers
@@ -652,5 +671,50 @@ public class GarbageCollectorThread extends SafeRunnable {
         LOG.debug("Retrieved entry log meta data entryLogId: {}, meta: {}",
                   entryLogId, entryLogMeta);
         return entryLogMeta;
+    }
+
+    /**
+     * This interfaces exist so dummy ledger managers can
+     * be injected for testing. We should move to a proper DI implementation at some point.
+     */
+    public interface LedgerManagerProvider {
+        LedgerManager getLedgerManager() throws InterruptedException, KeeperException, IOException;
+        void releaseResources() throws IOException, InterruptedException;
+    }
+
+    public static class LedgerManagerProviderImpl implements LedgerManagerProvider {
+        final ServerConfiguration conf;
+        ZooKeeper zk = null;
+        LedgerManagerFactory lmfactory = null;
+        LedgerManager ledgerManager = null;
+
+        LedgerManagerProviderImpl(ServerConfiguration conf) {
+            this.conf = conf;
+        }
+
+        public LedgerManager getLedgerManager() throws InterruptedException, KeeperException, IOException {
+            zk = ZkUtils.createConnectedZookeeperClient(conf.getZkServers(),
+                                                        new ZooKeeperWatcherBase(conf.getZkTimeout()));
+            lmfactory = LedgerManagerFactory.newLedgerManagerFactory(conf, zk);
+            LOG.info("instantiate ledger manager {}", lmfactory.getClass().getName());
+            ledgerManager = lmfactory.newLedgerManager();
+            return ledgerManager;
+        }
+
+        public void releaseResources() throws IOException, InterruptedException {
+            if (ledgerManager != null) {
+                ledgerManager.close();
+                ledgerManager = null;
+            }
+            if (lmfactory != null) {
+                lmfactory.uninitialize();
+                lmfactory = null;
+            }
+            if (zk != null) {
+                zk.close();
+                zk = null;
+            }
+        }
+
     }
 }

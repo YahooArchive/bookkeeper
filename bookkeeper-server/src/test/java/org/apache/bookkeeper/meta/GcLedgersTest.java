@@ -42,6 +42,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.bookkeeper.bookie.BookieException;
 import org.apache.bookkeeper.bookie.EntryLogger;
 import org.apache.bookkeeper.bookie.GarbageCollector;
+import org.apache.bookkeeper.bookie.GarbageCollectorThread;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage;
 import org.apache.bookkeeper.bookie.LedgerDirsManager;
 import org.apache.bookkeeper.bookie.ScanAndCompareGarbageCollector;
@@ -291,9 +292,9 @@ public class GcLedgersTest extends LedgerManagerTestCase {
     class MockLedgerStorage implements CompactableLedgerStorage {
 
         @Override
-        public void initialize(ServerConfiguration conf, LedgerManager ledgerManager,
+        public void initialize(ServerConfiguration conf,
+                GarbageCollectorThread.LedgerManagerProvider provider,
                 LedgerDirsManager ledgerDirsManager, StatsLogger stats) throws IOException {
-
         }
 
         @Override

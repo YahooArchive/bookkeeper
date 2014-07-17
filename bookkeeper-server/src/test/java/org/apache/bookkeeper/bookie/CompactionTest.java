@@ -22,7 +22,6 @@ package org.apache.bookkeeper.bookie;
  */
 import java.io.File;
 import java.io.IOException;
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -305,18 +304,22 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         verifyLedger(lhs[0].getId(), 0, lhs[0].getLastAddConfirmed());
     }
 
-    /**
-     * Test that compaction doesnt add to index without having persisted
-     * entrylog first. This is needed because compaction doesn't go through the journal.
-     * {@see https://issues.apache.org/jira/browse/BOOKKEEPER-530}
-     * {@see https://issues.apache.org/jira/browse/BOOKKEEPER-664}
-     */
-    @Test(timeout=60000)
-    public void testCompactionSafety() throws Exception {
-        tearDown(); // I dont want the test infrastructure
-        ServerConfiguration conf = new ServerConfiguration();
-        final Set<Long> ledgers = Collections.newSetFromMap(new ConcurrentHashMap<Long, Boolean>());
-        LedgerManager manager = new LedgerManager() {
+    public static class MockLedgerManagerProvider
+        implements GarbageCollectorThread.LedgerManagerProvider {
+        final Set<Long> ledgers;
+
+        MockLedgerManagerProvider(Set<Long> ledgers) {
+            this.ledgers = ledgers;
+        }
+
+        void unsupported() {
+            LOG.error("Unsupported operation called", new Exception());
+            throw new RuntimeException("Unsupported op");
+        }
+
+        @Override
+        public LedgerManager getLedgerManager() {
+            return new LedgerManager() {
                 @Override
                 public void createLedger(LedgerMetadata metadata, GenericCallback<Long> cb) {
                     unsupported();
@@ -344,10 +347,6 @@ public class CompactionTest extends BookKeeperClusterTestCase {
                 @Override
                 public void close() throws IOException {}
 
-                void unsupported() {
-                    LOG.error("Unsupported operation called", new Exception());
-                    throw new RuntimeException("Unsupported op");
-                }
                 @Override
                 public LedgerRangeIterator getLedgerRanges() {
                     final AtomicBoolean hasnext = new AtomicBoolean(true);
@@ -364,6 +363,23 @@ public class CompactionTest extends BookKeeperClusterTestCase {
                     };
                  }
             };
+        }
+
+        @Override
+        public void releaseResources() {}
+    }
+
+    /**
+     * Test that compaction doesnt add to index without having persisted
+     * entrylog first. This is needed because compaction doesn't go through the journal.
+     * {@see https://issues.apache.org/jira/browse/BOOKKEEPER-530}
+     * {@see https://issues.apache.org/jira/browse/BOOKKEEPER-664}
+     */
+    @Test(timeout=60000)
+    public void testCompactionSafety() throws Exception {
+        tearDown(); // I dont want the test infrastructure
+        ServerConfiguration conf = new ServerConfiguration();
+        final Set<Long> ledgers = Collections.newSetFromMap(new ConcurrentHashMap<Long, Boolean>());
 
         File tmpDir = File.createTempFile("bkTest", ".dir");
         tmpDir.delete();
@@ -385,7 +401,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         LedgerDirsManager dirs = new LedgerDirsManager(conf);
         assertFalse("Log shouldnt exist", log0.exists());
         InterleavedLedgerStorage storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs, NullStatsLogger.INSTANCE);
+        storage.initialize(conf, new MockLedgerManagerProvider(ledgers), dirs, NullStatsLogger.INSTANCE);
         ledgers.add(1l);
         ledgers.add(2l);
         ledgers.add(3l);
@@ -404,7 +420,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         ledgers.remove(3l);
 
         storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs, NullStatsLogger.INSTANCE);
+        storage.initialize(conf, new MockLedgerManagerProvider(ledgers), dirs, NullStatsLogger.INSTANCE);
         storage.start();
         for (int i = 0; i < 10; i++) {
             if (!log0.exists()) {
@@ -420,7 +436,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         storage.addEntry(genEntry(4, 1, ENTRY_SIZE)); // force ledger 1 page to flush
 
         storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs, NullStatsLogger.INSTANCE);
+        storage.initialize(conf, new MockLedgerManagerProvider(ledgers), dirs, NullStatsLogger.INSTANCE);
         storage.getEntry(1, 1); // entry should exist
     }
 
