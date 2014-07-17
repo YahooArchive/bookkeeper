@@ -20,37 +20,33 @@
  */
 package org.apache.bookkeeper.bookie;
 
-import static org.junit.Assert.fail;
-
 import java.io.File;
-import java.io.IOException;
 import java.net.BindException;
-import java.net.InetAddress;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import junit.framework.Assert;
 
 import org.apache.bookkeeper.bookie.Bookie;
-import org.apache.bookkeeper.bookie.BookieException;
+import org.apache.bookkeeper.client.BookKeeperAdmin;
 import org.apache.bookkeeper.conf.ClientConfiguration;
 import org.apache.bookkeeper.conf.ServerConfiguration;
-import org.apache.bookkeeper.stats.StatsLogger;
-
-import org.apache.bookkeeper.client.BookKeeperAdmin;
+import org.apache.bookkeeper.util.StateMachine;
 import org.apache.bookkeeper.proto.BookieServer;
 import org.apache.bookkeeper.test.ZooKeeperUtil;
 import org.apache.commons.io.FileUtils;
-import org.apache.zookeeper.WatchedEvent;
-import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.data.Stat;
-import org.apache.zookeeper.KeeperException;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.junit.Assert.fail;
 
 /**
  * Testing bookie initialization cases
@@ -77,49 +73,18 @@ public class BookieInitializationTest {
         zkutil.killServer();
     }
 
-    private static class MockBookie extends Bookie {
-        MockBookie(ServerConfiguration conf) throws IOException,
-                KeeperException, InterruptedException, BookieException {
-            super(conf);
+    static class DummyFatalErrorHandler implements Registrar.FatalErrorHandler {
+        CountDownLatch latch = new CountDownLatch(1);
+
+        boolean awaitFatalError(int count, TimeUnit unit) throws InterruptedException {
+            return latch.await(count, unit);
         }
 
-        void testRegisterBookie(ServerConfiguration conf) throws IOException {
-            super.registerBookie(conf);
+        @Override
+        public void fatalError(Throwable t) {
+            latch.countDown();
+            LOG.error("Fatal error", t);
         }
-    }
-
-    /**
-     * Verify the bookie server exit code. On ZooKeeper exception, should return
-     * exit code ZK_REG_FAIL = 4
-     */
-    @Test(timeout = 20000)
-    public void testExitCodeZK_REG_FAIL() throws Exception {
-        File tmpDir = File.createTempFile("bookie", "test");
-        tmpDir.delete();
-        tmpDir.mkdir();
-
-        final ServerConfiguration conf = new ServerConfiguration()
-                .setZkServers(null).setJournalDirName(tmpDir.getPath())
-                .setAllowLoopback(true)
-                .setLedgerDirNames(new String[] { tmpDir.getPath() });
-
-        // simulating ZooKeeper exception by assigning a closed zk client to bk
-        BookieServer bkServer = new BookieServer(conf) {
-            @Override
-            protected Bookie newBookie(ServerConfiguration conf, StatsLogger stats)
-                    throws IOException, KeeperException, InterruptedException,
-                    BookieException {
-                MockBookie bookie = new MockBookie(conf);
-                bookie.zk = zkc;
-                zkc.close();
-                return bookie;
-            };
-        };
-
-        bkServer.start();
-        bkServer.join();
-        Assert.assertEquals("Failed to return ExitCode.ZK_REG_FAIL",
-                ExitCode.ZK_REG_FAIL, bkServer.getExitCode());
     }
 
     /**
@@ -129,64 +94,34 @@ public class BookieInitializationTest {
      */
     @Test(timeout = 20000)
     public void testBookieRegistration() throws Exception {
-        File tmpDir = File.createTempFile("bookie", "test");
-        tmpDir.delete();
-        tmpDir.mkdir();
-
         final ServerConfiguration conf = new ServerConfiguration()
-                .setZkServers(null).setJournalDirName(tmpDir.getPath())
-                .setAllowLoopback(true)
-                .setLedgerDirNames(new String[] { tmpDir.getPath() });
+            .setZkServers(zkutil.getZooKeeperConnectString())
+            .setZkTimeout(3000);
+        final String testId = "testId:1234";
+        final String bkRegPath = conf.getZkAvailableBookiesPath() + "/" + testId;
 
-        final String bkRegPath = conf.getZkAvailableBookiesPath() + "/"
-                + InetAddress.getLocalHost().getHostAddress() + ":"
-                + conf.getBookiePort();
+        Registrar r = new Registrar(conf, testId, new DummyFatalErrorHandler());
+        r.register().get();
 
-        MockBookie b = new MockBookie(conf);
-        b.zk = zkc;
-        b.testRegisterBookie(conf);
         Stat bkRegNode1 = zkc.exists(bkRegPath, false);
         Assert.assertNotNull("Bookie registration node doesn't exists!",
                 bkRegNode1);
 
-        // simulating bookie restart, on restart bookie will create new
-        // zkclient and doing the registration.
-        createNewZKClient();
-        b.zk = newzk;
+        Registrar r2 = new Registrar(conf, testId, new DummyFatalErrorHandler());
 
-        // deleting the znode, so that the bookie registration should
-        // continue successfully on NodeDeleted event
-        new Thread() {
-            @Override
-            public void run() {
-                try {
-                    Thread.sleep(conf.getZkTimeout() / 3);
-                    zkc.delete(bkRegPath, -1);
-                } catch (Exception e) {
-                    // Not handling, since the testRegisterBookie will fail
-                    LOG.error("Failed to delete the znode :" + bkRegPath, e);
-                }
-            }
-        }.start();
-        try {
-            b.testRegisterBookie(conf);
-        } catch (IOException e) {
-            Throwable t = e.getCause();
-            if (t instanceof KeeperException) {
-                KeeperException ke = (KeeperException) t;
-                Assert.assertTrue("ErrorCode:" + ke.code()
-                        + ", Registration node exists",
-                        ke.code() != KeeperException.Code.NODEEXISTS);
-            }
-            throw e;
-        }
+        Future<Void> f = r2.register();
+        Thread.sleep(conf.getZkTimeout() / 3);
+        r.close();
 
+        f.get();
         // verify ephemeral owner of the bkReg znode
-        Stat bkRegNode2 = newzk.exists(bkRegPath, false);
+        Stat bkRegNode2 = zkc.exists(bkRegPath, false);
         Assert.assertNotNull("Bookie registration has been failed", bkRegNode2);
         Assert.assertTrue("Bookie is referring to old registration znode:"
-                + bkRegNode1 + ", New ZNode:" + bkRegNode2, bkRegNode1
-                .getEphemeralOwner() != bkRegNode2.getEphemeralOwner());
+                          + bkRegNode1 + ", New ZNode:" + bkRegNode2,
+                bkRegNode1.getEphemeralOwner() != bkRegNode2.getEphemeralOwner());
+
+        r2.close();
     }
 
     /**
@@ -196,54 +131,37 @@ public class BookieInitializationTest {
      */
     @Test(timeout = 30000)
     public void testRegNodeExistsAfterSessionTimeOut() throws Exception {
-        File tmpDir = File.createTempFile("bookie", "test");
-        tmpDir.delete();
-        tmpDir.mkdir();
+        final ServerConfiguration conf = new ServerConfiguration()
+            .setZkServers(zkutil.getZooKeeperConnectString())
+            .setZkTimeout(3000);
+        final String testId = "testId:1234";
+        final String bkRegPath = conf.getZkAvailableBookiesPath() + "/" + testId;
 
-        ServerConfiguration conf = new ServerConfiguration().setZkServers(null)
-                .setAllowLoopback(true)
-                .setJournalDirName(tmpDir.getPath()).setLedgerDirNames(
-                        new String[] { tmpDir.getPath() });
+        Registrar r = new Registrar(conf, testId, new DummyFatalErrorHandler());
+        r.register().get();
 
-        String bkRegPath = conf.getZkAvailableBookiesPath() + "/"
-                + InetAddress.getLocalHost().getHostAddress() + ":"
-                + conf.getBookiePort();
-
-        MockBookie b = new MockBookie(conf);
-        b.zk = zkc;
-        b.testRegisterBookie(conf);
         Stat bkRegNode1 = zkc.exists(bkRegPath, false);
-        Assert.assertNotNull("Bookie registration node doesn't exists!",
-                bkRegNode1);
+        Assert.assertNotNull("Bookie registration node doesn't exists!", bkRegNode1);
 
-        // simulating bookie restart, on restart bookie will create new
-        // zkclient and doing the registration.
-        createNewZKClient();
-        b.zk = newzk;
+        DummyFatalErrorHandler errorHandler = new DummyFatalErrorHandler();
+        Registrar r2 = new Registrar(conf, testId, errorHandler);
         try {
-            b.testRegisterBookie(conf);
-            fail("Should throw NodeExistsException as the znode is not getting expired");
-        } catch (IOException e) {
-            Throwable t = e.getCause();
-            if (t instanceof KeeperException) {
-                KeeperException ke = (KeeperException) t;
-                Assert.assertTrue("ErrorCode:" + ke.code()
-                        + ", Registration node doesn't exists",
-                        ke.code() == KeeperException.Code.NODEEXISTS);
-
-                // verify ephemeral owner of the bkReg znode
-                Stat bkRegNode2 = newzk.exists(bkRegPath, false);
-                Assert.assertNotNull("Bookie registration has been failed",
-                        bkRegNode2);
-                Assert.assertTrue(
-                        "Bookie wrongly registered. Old registration znode:"
-                                + bkRegNode1 + ", New znode:" + bkRegNode2,
-                        bkRegNode1.getEphemeralOwner() == bkRegNode2
-                                .getEphemeralOwner());
-                return;
-            }
-            throw e;
+            r2.register().get();
+            fail("Shouldn't get to here");
+        } catch (ExecutionException ee) {
+            Assert.assertEquals("Should be a node exists exception",
+                    KeeperException.NodeExistsException.class, ee.getCause().getClass());
         }
+        // verify ephemeral owner of the bkReg znode
+        Stat bkRegNode2 = zkc.exists(bkRegPath, false);
+        Assert.assertNotNull("Bookie registration has been failed", bkRegNode2);
+        Assert.assertTrue("Bookie wrongly registered. Old registration znode:"
+                          + bkRegNode1 + ", New znode:" + bkRegNode2,
+                          bkRegNode1.getEphemeralOwner() == bkRegNode2.getEphemeralOwner());
+        Assert.assertTrue("Fatal error handler should have triggered",
+                          errorHandler.awaitFatalError(5, TimeUnit.SECONDS));
+        r.close();
+        r2.close();
     }
 
     /**
@@ -338,24 +256,101 @@ public class BookieInitializationTest {
         }
     }
 
-    private void createNewZKClient() throws Exception {
-        // create a zookeeper client
-        LOG.debug("Instantiate ZK Client");
-        final CountDownLatch latch = new CountDownLatch(1);
-        newzk = new ZooKeeper(zkutil.getZooKeeperConnectString(), 10000,
-                new Watcher() {
-                    @Override
-                    public void process(WatchedEvent event) {
-                        // handle session disconnects and expires
-                        if (event.getState().equals(
-                                Watcher.Event.KeeperState.SyncConnected)) {
-                            latch.countDown();
-                        }
-                    }
-                });
-        if (!latch.await(10000, TimeUnit.MILLISECONDS)) {
-            newzk.close();
-            fail("Could not connect to zookeeper server");
+    public void waitForStateChange(StateMachine.Fsm fsm, StateMachine.State curState,
+                                   int timeout, TimeUnit unit) throws Exception {
+        long timeoutAt = System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout, unit);
+
+        while (fsm.getCurrentState() == curState) {
+            if (timeoutAt < System.nanoTime()) {
+                throw new Exception("State didn't change in " + timeout + " " + unit);
+            }
+            Thread.sleep(100);
         }
     }
+
+    /**
+     * Verify that the registrar can reestablish a registration even
+     * after a zookeeper session loss.
+     */
+    @Test(timeout=20000)
+    public void testRegistrarLosingZKSessionAndReestablishing() throws Exception {
+        final ServerConfiguration conf = new ServerConfiguration()
+            .setZkServers(zkutil.getZooKeeperConnectString())
+            .setZkTimeout(1000);
+        final String testId = "testId:1234";
+        final String bkRegPath = conf.getZkAvailableBookiesPath() + "/" + testId;
+
+        Registrar r = new Registrar(conf, testId, new DummyFatalErrorHandler());
+        r.register().get();
+
+        Stat bkRegNode1 = zkc.exists(bkRegPath, false);
+        Assert.assertNotNull("Bookie registration node doesn't exists!", bkRegNode1);
+
+        StateMachine.State curState = r.fsm.getCurrentState();
+        Assert.assertEquals("Should be in registered state",
+                curState.getClass(), Registrar.RegisteredState.class);
+        zkutil.expireSession(((Registrar.RegisteredState)curState).zk);
+
+        // wait for expiration to be observed
+        waitForStateChange(r.fsm, curState, 10, TimeUnit.SECONDS);
+
+        r.register().get();
+        r.close();
+    }
+
+    /**
+     * Verify that if a registrar has transitioned to readonly start and it
+     * loses its session, it will reconnect
+     */
+    @Test(timeout=20000)
+    public void testRegistrarReadOnlyLosingZKSessionAndReestablishing() throws Exception {
+        final ServerConfiguration conf = new ServerConfiguration()
+            .setZkServers(zkutil.getZooKeeperConnectString())
+            .setZkTimeout(1000);
+        final String testId = "testId:1234";
+
+        Registrar r = new Registrar(conf, testId, new DummyFatalErrorHandler());
+        r.register().get();
+        r.registerReadOnly().get();
+
+        Assert.assertNull("Reg node shouldn't exist",
+                zkc.exists(r.getBookieRegistrationPath(), false));
+        Assert.assertNotNull("RO Reg node doesn't exists!",
+                zkc.exists(r.getBookieReadOnlyRegistrationPath(), false));
+
+        StateMachine.State curState = r.fsm.getCurrentState();
+        Assert.assertEquals("Should be in registered readonly state",
+                curState.getClass(), Registrar.RegisteredReadOnlyState.class);
+        zkutil.expireSession(((Registrar.RegisteredReadOnlyState)curState).zk);
+
+        // wait for expiration to be observed
+        waitForStateChange(r.fsm, curState, 10, TimeUnit.SECONDS);
+
+        r.registerReadOnly().get();
+        r.close();
+    }
+
+    /*
+     * Verify that if a registrar is transitioned to readonly while the zookeeper
+     * session is lost, it will register correctly
+     */
+    @Test(timeout=20000)
+    public void testRegistrarLoseZKSessionDuringTransition() throws Exception {
+        final ServerConfiguration conf = new ServerConfiguration()
+            .setZkServers(zkutil.getZooKeeperConnectString())
+            .setZkTimeout(1000);
+        final String testId = "testId:1234";
+
+        Registrar r = new Registrar(conf, testId, new DummyFatalErrorHandler());
+        r.register();
+
+        zkutil.shutdownDaemon();
+
+        Thread.sleep(2*conf.getZkTimeout());
+
+        zkutil.startDaemon();
+        r.registerReadOnly().get();
+        r.close();
+    }
+
 }
