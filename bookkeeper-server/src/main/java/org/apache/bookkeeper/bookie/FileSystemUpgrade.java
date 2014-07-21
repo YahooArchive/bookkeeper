@@ -58,6 +58,8 @@ import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.KeeperException;
 
+import com.google.common.collect.Lists;
+
 import static com.google.common.base.Charsets.UTF_8;
 
 /**
@@ -104,7 +106,7 @@ public class FileSystemUpgrade {
 
     private static List<File> getAllDirectories(ServerConfiguration conf) {
         List<File> dirs = new ArrayList<File>();
-        dirs.add(conf.getJournalDir());
+        dirs.addAll(Lists.newArrayList(conf.getJournalDirs()));
         for (File d: conf.getLedgerDirs()) {
             dirs.add(d);
         }

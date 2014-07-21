@@ -25,22 +25,20 @@ import java.util.concurrent.Future;
 
 import org.apache.bookkeeper.bookie.CheckpointSource.Checkpoint;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 /**
  * Accessor class to avoid making Bookie internals public
  */
 public class BookieAccessor {
-    private static final Logger LOG = LoggerFactory.getLogger(BookieAccessor.class);
-
     /**
      * Force a bookie to flush its ledger storage
      */
     public static void forceFlush(Bookie b) throws IOException {
-        Checkpoint cp = b.journal.newCheckpoint();
+        CheckpointSourceList source = new CheckpointSourceList(b.journals);
+        Checkpoint checkpoint = source.newCheckpoint();
+
         b.ledgerStorage.flush();
-        b.journal.checkpointComplete(cp, true);
+
+        source.checkpointComplete(checkpoint, true);
     }
 
     public static Future<?> triggerGC(Bookie b) {
