@@ -31,7 +31,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Implements a ledger inside a bookie. In particular, it implements operations
  * to write entries to a ledger and read entries from a ledger.
- *
+ * 
  */
 public class LedgerDescriptorImpl extends LedgerDescriptor {
     final static Logger LOG = LoggerFactory.getLogger(LedgerDescriptor.class);
@@ -49,6 +49,8 @@ public class LedgerDescriptorImpl extends LedgerDescriptor {
     @Override
     void checkAccess(byte masterKey[]) throws BookieException, IOException {
         if (!Arrays.equals(this.masterKey, masterKey)) {
+            LOG.error("Ledger masterKey mismatched. local masterKey:{}, client masterKey:{}",
+                    Arrays.toString(this.masterKey), Arrays.toString(masterKey));
             throw BookieException.create(BookieException.Code.UnauthorizedAccessException);
         }
     }
