@@ -40,6 +40,7 @@ import com.google.protobuf.ByteString;
 
 public class DbLedgerStorage implements CompactableLedgerStorage {
 
+    private WriteCache cache;
     private EntryLogger entryLogger;
 
     private LedgerMetadataIndex ledgerIndex;
@@ -54,8 +55,6 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     private final AtomicLong writeCacheSizeTrimmed = new AtomicLong(0);
     private final ReentrantReadWriteLock writeCacheMutex = new ReentrantReadWriteLock();
 
-    private final WriteCache cache = new WriteCache();
-
     private final RateLimiter writeRateLimiter = RateLimiter.create(5000);
     private final RateLimiter readRateLimiter = RateLimiter.create(100);
     private final AtomicBoolean isThrottlingRequests = new AtomicBoolean(false);
@@ -63,11 +62,16 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     private final ExecutorService executor = Executors.newCachedThreadPool(new ThreadFactoryBuilder().setNameFormat(
             "db-storage-%s").build());
 
-    private static final String WRITE_CACHE_MAX_SIZE = "writeCacheMaxSize";
+    static final String WRITE_CACHE_MAX_SIZE_MB = "dbStorage_writeCacheMaxSizeMb";
+    static final String WRITE_CACHE_CHUNK_SIZE_MB = "dbStorage_writeCacheChunkSizeMb";
+    static final String TRIM_ENABLED = "dbStorage_trimEnabled";
 
-    private static final long DEFAULT_WRITE_CACHE_MAX_SIZE = 4 * 1024 * 1024 * 1024L;
+    private static final long DEFAULT_WRITE_CACHE_MAX_SIZE_MB = 16;
+    private static final int DEFAULT_WRITE_CACHE_CHUNK_SIZE_MB = 1;
+    private static final int MB = 1024 * 1024;
 
     private long writeCacheMaxSize;
+    private boolean trimEnabled;
 
     @Override
     public void initialize(ServerConfiguration conf, LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager)
@@ -77,10 +81,17 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
         String baseDir = ledgerDirsManager.getAllLedgerDirs().get(0).toString();
 
-        writeCacheMaxSize = conf.getLong(WRITE_CACHE_MAX_SIZE, DEFAULT_WRITE_CACHE_MAX_SIZE);
+        writeCacheMaxSize = conf.getLong(WRITE_CACHE_MAX_SIZE_MB, DEFAULT_WRITE_CACHE_MAX_SIZE_MB) * MB;
+        int writeCacheChunkSize = conf.getInt(WRITE_CACHE_CHUNK_SIZE_MB, DEFAULT_WRITE_CACHE_CHUNK_SIZE_MB) * MB;
+        trimEnabled = conf.getBoolean(TRIM_ENABLED, false);
+
+        log.info("Started Db Ledger Storage - Write cache size: {} Mb - Trim enabled: {}",
+                writeCacheMaxSize / 1024 / 1024, trimEnabled);
 
         ledgerIndex = new LedgerMetadataIndex(baseDir);
         entryLocationIndex = new EntryLocationIndex(baseDir);
+
+        cache = new WriteCache(writeCacheChunkSize);
 
         entryLogger = new EntryLogger(conf, ledgerDirsManager);
         gcThread = new GarbageCollectorThread(conf, ledgerManager, this);
@@ -337,6 +348,10 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
     @Override
     public void trimEntries(long ledgerId, long lastEntryId) throws IOException {
+        if (!trimEnabled) {
+            return;
+        }
+
         log.debug("Trim entries {}@{}", ledgerId, lastEntryId);
 
         // Trimming only affects entries that are still in the write cache
@@ -378,8 +393,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     }
 
     @Override
-    public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId)
-            throws IOException {
+    public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId) throws IOException {
         return ledgerIndex.getActiveLedgersInRange(firstLedgerId, lastLedgerId);
     }
 

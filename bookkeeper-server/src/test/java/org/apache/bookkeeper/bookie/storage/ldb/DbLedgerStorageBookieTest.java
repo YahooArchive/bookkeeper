@@ -11,6 +11,7 @@ public class DbLedgerStorageBookieTest extends BookKeeperClusterTestCase {
     public DbLedgerStorageBookieTest() {
         super(1);
         baseConf.setLedgerStorageClass(DbLedgerStorage.class.getName());
+        baseConf.setProperty(DbLedgerStorage.TRIM_ENABLED, true);
     }
 
     @Test

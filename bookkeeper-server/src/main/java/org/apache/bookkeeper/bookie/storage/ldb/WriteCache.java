@@ -10,16 +10,16 @@ import com.google.common.collect.Queues;
 
 public class WriteCache {
 
-    final static int ChunkSize = 128 * 1024 * 1024;
-
     private final Queue<ByteBuffer> emptyBuffers = Queues.newArrayDeque();
     private final Queue<ByteBuffer> fullBuffers = Queues.newArrayDeque();
     private final Queue<ByteBuffer> beingFlushedBuffers = Queues.newArrayDeque();
 
     private ByteBuffer buffer;
+    private final int chunkSize;
 
-    public WriteCache() {
-        buffer = ByteBuffer.allocate(ChunkSize);
+    public WriteCache(int chunkSize) {
+        this.chunkSize = chunkSize;
+        buffer = ByteBuffer.allocate(chunkSize);
     }
 
     public ByteBuffer addEntry(ByteBuffer entry) {
@@ -65,7 +65,7 @@ public class WriteCache {
         } else {
             log.info("Allocate new memory chunk --  buffers - full: {} - progress: {}", fullBuffers.size(),
                     beingFlushedBuffers.size());
-            return ByteBuffer.allocate(ChunkSize);
+            return ByteBuffer.allocate(chunkSize);
         }
     }
 

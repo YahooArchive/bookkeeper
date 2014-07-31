@@ -1,7 +1,6 @@
 package org.apache.bookkeeper.bookie.storage.ldb;
 
 import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertFalse;
 import static junit.framework.Assert.assertTrue;
 import static junit.framework.Assert.fail;
 
@@ -10,13 +9,10 @@ import java.nio.ByteBuffer;
 import java.util.List;
 
 import org.apache.bookkeeper.bookie.Bookie;
-import org.apache.bookkeeper.bookie.Bookie.EntryTrimmedException;
 import org.apache.bookkeeper.bookie.Bookie.NoEntryException;
 import org.apache.bookkeeper.bookie.EntryLogger;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
-import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorage;
-import org.apache.bookkeeper.bookie.LedgerStorage;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.proto.BookieProtocol;
 import org.junit.Test;
@@ -120,15 +116,10 @@ public class DbLedgerStorageTest {
         entry4.flip();
         storage.addEntry(entry4);
 
-        // Trimming
+        // Trimming should be disabled by default
         storage.trimEntries(4, 3);
-
-        try {
-            storage.getEntry(4, 3);
-            fail("Should have thrown exception");
-        } catch (EntryTrimmedException e) {
-            // ok
-        }
+        res = storage.getEntry(4, 3);
+        assertEquals(entry3, res);
 
         res = storage.getEntry(4, 4);
         assertEquals(entry4, res);
