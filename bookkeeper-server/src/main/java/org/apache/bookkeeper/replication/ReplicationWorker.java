@@ -128,11 +128,11 @@ public class ReplicationWorker implements Runnable {
         workerRunning = true;
         while (workerRunning) {
             try {
-                long start = MathUtils.now();
+                long start = MathUtils.nowInNano();
                 if (rereplicate()) {
-                    replicateLedgerOpStats.registerSuccessfulEvent(MathUtils.now()-start);
+                    replicateLedgerOpStats.registerSuccessfulEvent(MathUtils.elapsedNanos(start));
                 } else {
-                    replicateLedgerOpStats.registerFailedEvent(MathUtils.now()-start);
+                    replicateLedgerOpStats.registerFailedEvent(MathUtils.elapsedNanos(start));
                 }
             } catch (InterruptedException e) {
                 LOG.info("InterruptedException "

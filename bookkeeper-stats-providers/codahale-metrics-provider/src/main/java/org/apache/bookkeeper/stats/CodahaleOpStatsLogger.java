@@ -23,7 +23,6 @@ import com.codahale.metrics.Timer;
 import com.codahale.metrics.Snapshot;
 
 import java.util.Arrays;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 class CodahaleOpStatsLogger implements OpStatsLogger {
@@ -36,12 +35,12 @@ class CodahaleOpStatsLogger implements OpStatsLogger {
     }
 
     // OpStatsLogger functions
-    public void registerFailedEvent(long eventLatencyMillis) {
-        fail.update(eventLatencyMillis, TimeUnit.MILLISECONDS);
+    public void registerFailedEvent(long eventLatencyNanos) {
+        fail.update(eventLatencyNanos, TimeUnit.NANOSECONDS);
     }
 
-    public void registerSuccessfulEvent(long eventLatencyMillis) {
-        success.update(eventLatencyMillis, TimeUnit.MILLISECONDS);
+    public void registerSuccessfulEvent(long eventLatencyNanos) {
+        success.update(eventLatencyNanos, TimeUnit.NANOSECONDS);
     }
 
     public synchronized void clear() {

@@ -455,7 +455,7 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
 
         boolean success = false;
         int statType = BKStats.STATS_UNKNOWN;
-        long startTime = MathUtils.now();
+        long startTime = MathUtils.nowInNano();
 
         // packet format is different between ADDENTRY and READENTRY
         long ledgerId = -1;
@@ -650,9 +650,9 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
             src.sendResponse(rsp);
 
             if (success) {
-                readOpStats.registerSuccessfulEvent(MathUtils.now()-startTime);
+                readOpStats.registerSuccessfulEvent(MathUtils.elapsedNanos(startTime));
             } else {
-                readOpStats.registerFailedEvent(MathUtils.now()-startTime);
+                readOpStats.registerFailedEvent(MathUtils.elapsedNanos(startTime));
             }
             break;
 
@@ -674,8 +674,7 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
             if (success) {
                 // for add operations, we compute latency in writeComplete callbacks.
                 if (statType != BKStats.STATS_ADD) {
-                    long elapsedTime = MathUtils.now() - startTime;
-                    bkStats.getOpStats(statType).updateLatency(elapsedTime);
+                    bkStats.getOpStats(statType).updateLatency(MathUtils.elapsedMSec(startTime));
                 }
             } else {
                 bkStats.getOpStats(statType).incrementFailedOps();
@@ -711,16 +710,15 @@ public class BookieServer implements NIOServerFactory.PacketProcessor, Bookkeepe
         }
         src.sendResponse(new ByteBuffer[] { bb });
         if (rc == BKException.Code.OK) {
-            addOpStats.registerSuccessfulEvent(MathUtils.now()-startTime);
+            addOpStats.registerSuccessfulEvent(MathUtils.elapsedNanos(startTime));
         } else {
-            addOpStats.registerFailedEvent(MathUtils.now()-startTime);
+            addOpStats.registerFailedEvent(MathUtils.elapsedNanos(startTime));
         }
         if (isStatsEnabled) {
             // compute the latency
             if (0 == rc) {
                 // for add operations, we compute latency in writeComplete callbacks.
-                long elapsedTime = MathUtils.now() - startTime;
-                bkStats.getOpStats(BKStats.STATS_ADD).updateLatency(elapsedTime);
+                bkStats.getOpStats(BKStats.STATS_ADD).updateLatency(MathUtils.elapsedMSec(startTime));
             } else {
                 bkStats.getOpStats(BKStats.STATS_ADD).incrementFailedOps();                
             }

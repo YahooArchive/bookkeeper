@@ -1045,7 +1045,7 @@ public class PerChannelBookieClient extends SimpleChannelHandler implements Chan
         }
 
         public long elapsedTime() {
-            return MathUtils.elapsedMSec(startTime);
+            return MathUtils.elapsedNanos(startTime);
         }
     }
 

@@ -23,17 +23,17 @@ package org.apache.bookkeeper.stats;
 public interface OpStatsLogger {
 
     /**
-     * Increment the failed op counter with the given eventLatencyMillis.
-     * @param eventLatencyMillis The event latency in milliseconds.
+     * Increment the failed op counter with the given eventLatencyNanos.
+     * @param eventLatencyMillis The event latency in nanoseconds.
      */
-    public void registerFailedEvent(long eventLatencyMillis);
+    public void registerFailedEvent(long eventLatencyNanos);
 
     /**
-     * An operation succeeded with the given eventLatencyMillis. Update
+     * An operation succeeded with the given eventLatencyNanos. Update
      * stats to reflect the same
-     * @param eventLatencyMillis The event latency in milliseconds.
+     * @param eventLatencyMillis The event latency in nanoseconds.
      */
-    public void registerSuccessfulEvent(long eventLatencyMillis);
+    public void registerSuccessfulEvent(long eventLatencyNanos);
 
     /**
      * @return Returns an OpStatsData object with necessary values. We need this function

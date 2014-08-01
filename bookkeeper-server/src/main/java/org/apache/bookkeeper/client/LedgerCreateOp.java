@@ -141,9 +141,9 @@ class LedgerCreateOp implements GenericCallback<Long> {
     private void createComplete(int rc, LedgerHandle lh) {
         // Opened a new ledger
         if (BKException.Code.OK != rc) {
-            createOpLogger.registerFailedEvent(MathUtils.elapsedMSec(startTime));
+            createOpLogger.registerFailedEvent(MathUtils.elapsedNanos(startTime));
         } else {
-            createOpLogger.registerSuccessfulEvent(MathUtils.elapsedMSec(startTime));
+            createOpLogger.registerSuccessfulEvent(MathUtils.elapsedNanos(startTime));
         }
         cb.createComplete(rc, lh, ctx);
     }

@@ -52,7 +52,7 @@ class PendingAddOp implements WriteCallback {
 
     LedgerHandle lh;
     boolean isRecoveryAdd = false;
-    long requestTimeMillis;
+    long requestTimeNanos;
     OpStatsLogger addOpLogger;
 
     PendingAddOp(LedgerHandle lh, AddCallback cb, Object ctx) {
@@ -129,7 +129,7 @@ class PendingAddOp implements WriteCallback {
 
 
     void initiate(ChannelBuffer toSend) {
-        requestTimeMillis = MathUtils.now();
+        requestTimeNanos = MathUtils.nowInNano();
         this.toSend = toSend;
         for (int bookieIndex : writeSet) {
             sendWriteRequest(bookieIndex);
@@ -183,13 +183,13 @@ class PendingAddOp implements WriteCallback {
     }
 
     void submitCallback(final int rc) {
-        long latencyMillis = MathUtils.now() - requestTimeMillis;
+        long latencyNanos = MathUtils.elapsedNanos(requestTimeNanos);
         if (rc != BKException.Code.OK) {
-            addOpLogger.registerFailedEvent(latencyMillis);
+            addOpLogger.registerFailedEvent(latencyNanos);
             LOG.error("Write of ledger entry to quorum failed: L{} E{}",
                       lh.getId(), entryId);
         } else {
-            addOpLogger.registerSuccessfulEvent(latencyMillis);
+            addOpLogger.registerSuccessfulEvent(latencyNanos);
         }
         cb.addComplete(rc, lh, entryId, ctx);
     }

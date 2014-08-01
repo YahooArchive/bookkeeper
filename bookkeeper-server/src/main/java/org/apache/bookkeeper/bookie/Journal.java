@@ -237,7 +237,7 @@ class Journal extends Thread {
             this.ctx = ctx;
             this.ledgerId = ledgerId;
             this.entryId = entryId;
-            this.enqueueTime = MathUtils.now();
+            this.enqueueTime = MathUtils.nowInNano();
         }
 
         ByteBuffer entry;
@@ -518,7 +518,7 @@ class Journal extends Thread {
                             lastFlushPosition = bc.position();
 
                             lastLogMark.setLastLogMark(logId, lastFlushPosition);
-                            long now = MathUtils.now();
+                            long now = MathUtils.nowInNano();
 
                             for (QueueEntry e : toFlush) {
                                 e.cb.writeComplete(BookieException.Code.OK,
