@@ -28,6 +28,7 @@ import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.jmx.BKMBeanInfo;
 import org.apache.bookkeeper.meta.LedgerManager;
 import org.apache.bookkeeper.proto.BookieProtocol;
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,8 +75,8 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     private boolean trimEnabled;
 
     @Override
-    public void initialize(ServerConfiguration conf, LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager)
-            throws IOException {
+    public void initialize(ServerConfiguration conf, LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager,
+            StatsLogger stats) throws IOException {
         checkArgument(ledgerDirsManager.getAllLedgerDirs().size() == 1,
                 "Db implementation only allows for one storage dir");
 
@@ -407,15 +408,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
     @Override
     public BKMBeanInfo getJMXBean() {
-        return new BKMBeanInfo() {
-            public boolean isHidden() {
-                return false;
-            }
-
-            public String getName() {
-                return "DbLedgerStorage";
-            }
-        };
+        return null;
     }
 
     @Override

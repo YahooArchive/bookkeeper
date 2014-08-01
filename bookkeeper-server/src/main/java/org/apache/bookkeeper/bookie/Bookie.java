@@ -572,7 +572,7 @@ public class Bookie extends Thread {
         String ledgerStorageClass = conf.getLedgerStorageClass();
         LOG.info("using ledger storage: {}", ledgerStorageClass);
         ledgerStorage = LedgerStorageFactory.createLedgerStorage(ledgerStorageClass);
-        ledgerStorage.initialize(conf, ledgerManager, ledgerDirsManager);
+        ledgerStorage.initialize(conf, ledgerManager, ledgerDirsManager, stats.scope("storage"));
 
         handles = new HandleFactoryImpl(ledgerStorage);
         // instantiate the journal
@@ -720,7 +720,9 @@ public class Bookie extends Thread {
 
             try {
                 jmxLedgerStorageBean = this.ledgerStorage.getJMXBean();
-                BKMBeanRegistry.getInstance().register(jmxLedgerStorageBean, jmxBookieBean);
+                if (jmxLedgerStorageBean != null) {
+                    BKMBeanRegistry.getInstance().register(jmxLedgerStorageBean, jmxBookieBean);
+                }
             } catch (Exception e) {
                 LOG.warn("Failed to register with JMX for ledger cache", e);
                 jmxLedgerStorageBean = null;

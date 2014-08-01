@@ -873,8 +873,8 @@ public class BookieShell implements Tool {
             InterleavedLedgerStorage interleavedStorage = new InterleavedLedgerStorage();
             DbLedgerStorage dbStorage = new DbLedgerStorage();
 
-            interleavedStorage.initialize(conf, null, ledgerDirsManager);
-            dbStorage.initialize(conf, null, ledgerDirsManager);
+            interleavedStorage.initialize(conf, null, ledgerDirsManager, NullStatsLogger.INSTANCE);
+            dbStorage.initialize(conf, null, ledgerDirsManager, NullStatsLogger.INSTANCE);
 
             for (long ledgerId : interleavedStorage.getActiveLedgersInRange(0, Long.MAX_VALUE)) {
                 LOG.info("Converting ledger {}", ledgerId);

@@ -10,6 +10,7 @@ import org.apache.bookkeeper.bookie.BookieShell;
 import org.apache.bookkeeper.bookie.InterleavedLedgerStorage;
 import org.apache.bookkeeper.bookie.LedgerDirsManager;
 import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -32,7 +33,7 @@ public class ConversionTest {
         LedgerDirsManager ledgerDirsManager = new LedgerDirsManager(conf);
 
         InterleavedLedgerStorage interleavedStorage = new InterleavedLedgerStorage();
-        interleavedStorage.initialize(conf, null, ledgerDirsManager);
+        interleavedStorage.initialize(conf, null, ledgerDirsManager, NullStatsLogger.INSTANCE);
 
         // Insert some ledger & entries in the interleaved storage
         for (long ledgerId = 0; ledgerId < 5; ledgerId++) {
@@ -62,10 +63,10 @@ public class ConversionTest {
 
         // Verify that db index has the same entries
         DbLedgerStorage dbStorage = new DbLedgerStorage();
-        dbStorage.initialize(conf, null, ledgerDirsManager);
+        dbStorage.initialize(conf, null, ledgerDirsManager, NullStatsLogger.INSTANCE);
 
         interleavedStorage = new InterleavedLedgerStorage();
-        interleavedStorage.initialize(conf, null, ledgerDirsManager);
+        interleavedStorage.initialize(conf, null, ledgerDirsManager, NullStatsLogger.INSTANCE);
 
         List<Long> ledgers = Lists.newArrayList(dbStorage.getActiveLedgersInRange(0, Long.MAX_VALUE));
         Assert.assertEquals(Lists.newArrayList(0l, 1l, 2l, 3l, 4l), ledgers);

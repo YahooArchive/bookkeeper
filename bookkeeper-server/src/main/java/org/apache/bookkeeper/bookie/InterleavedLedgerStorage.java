@@ -27,11 +27,11 @@ import java.util.Map;
 import java.util.NavigableMap;
 
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage;
-import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.jmx.BKMBeanInfo;
 import org.apache.bookkeeper.meta.LedgerManager;
 import org.apache.bookkeeper.proto.BookieProtocol;
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.util.SnapshotMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,8 +60,8 @@ public class InterleavedLedgerStorage implements CompactableLedgerStorage {
     }
 
     @Override
-    public void initialize(ServerConfiguration conf, LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager)
-            throws IOException {
+    public void initialize(ServerConfiguration conf, LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager,
+            StatsLogger stats) throws IOException {
         entryLogger = new EntryLogger(conf, ledgerDirsManager);
         ledgerCache = new LedgerCacheImpl(conf, activeLedgers, ledgerDirsManager);
         gcThread = new GarbageCollectorThread(conf, ledgerManager, this);

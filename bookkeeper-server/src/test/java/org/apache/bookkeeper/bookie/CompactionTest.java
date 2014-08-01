@@ -35,18 +35,16 @@ import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.client.LedgerEntry;
 import org.apache.bookkeeper.client.LedgerHandle;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
+import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.test.BookKeeperClusterTestCase;
 import org.apache.bookkeeper.util.TestUtils;
-
 import org.apache.zookeeper.AsyncCallback;
 import org.apache.bookkeeper.client.LedgerMetadata;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.Processor;
 import org.apache.bookkeeper.versioning.Version;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.junit.Before;
 import org.junit.Test;
 
@@ -387,7 +385,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         LedgerDirsManager dirs = new LedgerDirsManager(conf);
         assertFalse("Log shouldnt exist", log0.exists());
         InterleavedLedgerStorage storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs);
+        storage.initialize(conf, manager, dirs, NullStatsLogger.INSTANCE);
         ledgers.add(1l);
         ledgers.add(2l);
         ledgers.add(3l);
@@ -406,7 +404,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         ledgers.remove(3l);
 
         storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs);
+        storage.initialize(conf, manager, dirs, NullStatsLogger.INSTANCE);
         storage.start();
         for (int i = 0; i < 10; i++) {
             if (!log0.exists()) {
@@ -422,7 +420,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         storage.addEntry(genEntry(4, 1, ENTRY_SIZE)); // force ledger 1 page to flush
 
         storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs);
+        storage.initialize(conf, manager, dirs, NullStatsLogger.INSTANCE);
         storage.getEntry(1, 1); // entry should exist
     }
 

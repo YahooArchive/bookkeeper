@@ -53,6 +53,7 @@ import org.apache.bookkeeper.jmx.BKMBeanInfo;
 import org.apache.bookkeeper.meta.LedgerManager.LedgerRange;
 import org.apache.bookkeeper.meta.LedgerManager.LedgerRangeIterator;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.versioning.Version;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -291,7 +292,7 @@ public class GcLedgersTest extends LedgerManagerTestCase {
 
         @Override
         public void initialize(ServerConfiguration conf, LedgerManager ledgerManager,
-                LedgerDirsManager ledgerDirsManager) throws IOException {
+                LedgerDirsManager ledgerDirsManager, StatsLogger stats) throws IOException {
 
         }
 

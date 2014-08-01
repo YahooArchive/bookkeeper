@@ -27,6 +27,7 @@ import java.nio.ByteBuffer;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.jmx.BKMBeanInfo;
 import org.apache.bookkeeper.meta.LedgerManager;
+import org.apache.bookkeeper.stats.StatsLogger;
 
 /**
  * Interface for storing ledger data
@@ -41,7 +42,8 @@ public interface LedgerStorage {
      * @param ledgerManager
      * @param ledgerDirsManager
      */
-    void initialize(ServerConfiguration conf, LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager) throws IOException;
+    void initialize(ServerConfiguration conf, LedgerManager ledgerManager, LedgerDirsManager ledgerDirsManager,
+            StatsLogger stats) throws IOException;
 
     /**
      * Start any background threads
