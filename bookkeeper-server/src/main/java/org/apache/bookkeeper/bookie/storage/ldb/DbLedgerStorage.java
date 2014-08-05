@@ -1,15 +1,14 @@
 package org.apache.bookkeeper.bookie.storage.ldb;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 import java.util.Map.Entry;
-import java.util.NavigableMap;
 import java.util.SortedMap;
-import java.util.concurrent.ConcurrentNavigableMap;
-import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -41,7 +40,6 @@ import com.google.protobuf.ByteString;
 
 public class DbLedgerStorage implements CompactableLedgerStorage {
 
-    private WriteCache cache;
     private EntryLogger entryLogger;
 
     private LedgerMetadataIndex ledgerIndex;
@@ -49,10 +47,17 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
     private GarbageCollectorThread gcThread;
 
-    private ConcurrentNavigableMap<LongPair, ByteBuffer> writeCache = new ConcurrentSkipListMap<LongPair, ByteBuffer>();
-    private ConcurrentNavigableMap<LongPair, ByteBuffer> writeCacheBeingFlushed;
+    private final PooledByteBufAllocator allocator = new PooledByteBufAllocator(false);
 
-    private final AtomicLong writeCacheSize = new AtomicLong(0);
+    // Write cache where all new entries are inserted into
+    private EntryCache writeCache = new EntryCache(allocator);
+
+    // Write cache that is used to swap with writeCache during flushes
+    private EntryCache writeCacheBeingFlushed = new EntryCache(allocator);
+
+    // Cache where we insert entries for speculative reading
+    private final EntryCache readAheadCache = new EntryCache(allocator);
+
     private final AtomicLong writeCacheSizeTrimmed = new AtomicLong(0);
     private final ReentrantReadWriteLock writeCacheMutex = new ReentrantReadWriteLock();
 
@@ -64,14 +69,18 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
             "db-storage-%s").build());
 
     static final String WRITE_CACHE_MAX_SIZE_MB = "dbStorage_writeCacheMaxSizeMb";
-    static final String WRITE_CACHE_CHUNK_SIZE_MB = "dbStorage_writeCacheChunkSizeMb";
+    static final String READ_AHEAD_CACHE_BATCH_SIZE = "dbStorage_readAheadCacheBatchSize";
+    static final String READ_AHEAD_CACHE_MAX_SIZE_MB = "dbStorage_readAheadCacheMaxSizeMb";
     static final String TRIM_ENABLED = "dbStorage_trimEnabled";
 
     private static final long DEFAULT_WRITE_CACHE_MAX_SIZE_MB = 16;
-    private static final int DEFAULT_WRITE_CACHE_CHUNK_SIZE_MB = 1;
+    private static final long DEFAULT_READ_AHEAD_CACHE_MAX_SIZE_MB = 16;
+    private static final int DEFAULT_READ_AHEAD_CACHE_BATCH_SIZE = 100;
     private static final int MB = 1024 * 1024;
 
     private long writeCacheMaxSize;
+    private long readAheadCacheMaxSize;
+    private int readAheadCacheBatchSize;
     private boolean trimEnabled;
 
     @Override
@@ -83,7 +92,8 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         String baseDir = ledgerDirsManager.getAllLedgerDirs().get(0).toString();
 
         writeCacheMaxSize = conf.getLong(WRITE_CACHE_MAX_SIZE_MB, DEFAULT_WRITE_CACHE_MAX_SIZE_MB) * MB;
-        int writeCacheChunkSize = conf.getInt(WRITE_CACHE_CHUNK_SIZE_MB, DEFAULT_WRITE_CACHE_CHUNK_SIZE_MB) * MB;
+        readAheadCacheMaxSize = conf.getLong(READ_AHEAD_CACHE_MAX_SIZE_MB, DEFAULT_READ_AHEAD_CACHE_MAX_SIZE_MB) * MB;
+        readAheadCacheBatchSize = conf.getInt(READ_AHEAD_CACHE_BATCH_SIZE, DEFAULT_READ_AHEAD_CACHE_BATCH_SIZE);
         trimEnabled = conf.getBoolean(TRIM_ENABLED, false);
 
         log.info("Started Db Ledger Storage - Write cache size: {} Mb - Trim enabled: {}",
@@ -91,8 +101,6 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
         ledgerIndex = new LedgerMetadataIndex(baseDir);
         entryLocationIndex = new EntryLocationIndex(baseDir);
-
-        cache = new WriteCache(writeCacheChunkSize);
 
         entryLogger = new EntryLogger(conf, ledgerDirsManager);
         gcThread = new GarbageCollectorThread(conf, ledgerManager, this);
@@ -111,6 +119,10 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
             ledgerIndex.close();
             entryLocationIndex.close();
+
+            writeCache.clear();
+            writeCacheBeingFlushed.clear();
+            readAheadCache.clear();
 
             executor.shutdown();
 
@@ -166,24 +178,18 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         entry.rewind();
 
         log.debug("Add entry. {}@{}", ledgerId, entryId);
-
-        long cacheSize;
-
         if (isThrottlingRequests.get()) {
             writeRateLimiter.acquire();
         }
 
         writeCacheMutex.readLock().lock();
         try {
-            ByteBuffer cachedEntry = cache.addEntry(entry);
-
-            writeCache.put(new LongPair(ledgerId, entryId), cachedEntry);
-            cacheSize = writeCacheSize.addAndGet(entry.remaining());
+            writeCache.put(ledgerId, entryId, entry);
         } finally {
             writeCacheMutex.readLock().unlock();
         }
 
-        if (cacheSize > writeCacheMaxSize && isThrottlingRequests.compareAndSet(false, true)) {
+        if (writeCache.size() > writeCacheMaxSize && isThrottlingRequests.compareAndSet(false, true)) {
             // Trigger an early flush in background
             executor.submit(new Runnable() {
                 public void run() {
@@ -206,25 +212,28 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
             return getLastEntry(ledgerId);
         }
 
-        LongPair entryKey = new LongPair(ledgerId, entryId);
-
         writeCacheMutex.readLock().lock();
         try {
             // First try to read from the write cache of recent entries
-            ByteBuffer entry = writeCache.get(entryKey);
+            ByteBuffer entry = writeCache.get(ledgerId, entryId);
             if (entry != null) {
-                return entry.duplicate();
+                return entry;
             }
 
             // If there's a flush going on, the entry might be in the flush buffer
-            if (writeCacheBeingFlushed != null) {
-                entry = writeCacheBeingFlushed.get(entryKey);
-                if (entry != null) {
-                    return entry.duplicate();
-                }
+            entry = writeCacheBeingFlushed.get(ledgerId, entryId);
+            if (entry != null) {
+                return entry;
             }
         } finally {
             writeCacheMutex.readLock().unlock();
+        }
+
+        // Try reading from read-ahead cache
+        ByteBuffer entry = readAheadCache.get(ledgerId, entryId);
+        if (entry != null) {
+            readAheadCache.invalidate(ledgerId, entryId);
+            return entry;
         }
 
         // When reading from db we want to avoid that too many reads to affect the flush time
@@ -234,8 +243,13 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
         // Read from main storage
         try {
-            long entryLocation = entryLocationIndex.getLocation(ledgerId, entryId);
+            LedgerIndexPage ledgerIndexPage = entryLocationIndex.getLedgerIndexPage(ledgerId, entryId);
+            long entryLocation = ledgerIndexPage.getPosition(entryId);
             byte[] content = entryLogger.readEntry(ledgerId, entryId, entryLocation);
+
+            // Try to read more entries
+            fillReadAheadCache(ledgerIndexPage, ledgerId, entryId + 1);
+
             return ByteBuffer.wrap(content);
         } catch (NoEntryException e) {
             if (ledgerExists(ledgerId)) {
@@ -249,25 +263,59 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         }
     }
 
-    public ByteBuffer getLastEntry(long ledgerId) throws IOException {
-        // Next entry key is the first entry of the next ledger, we first seek to that entry and then step back to find
-        // the last entry on ledgerId
-        LongPair nextEntryKey = new LongPair(ledgerId + 1, 0);
+    private void fillReadAheadCache(LedgerIndexPage ledgerIndexPage, long ledgerId, long entryId) {
+        try {
+            long lastEntryInPage = ledgerIndexPage.getLastEntry();
+            int count = 0;
 
+            while (count < readAheadCacheBatchSize && entryId <= lastEntryInPage
+                    && readAheadCache.size() < readAheadCacheMaxSize) {
+                long entryLocation = ledgerIndexPage.getPosition(entryId);
+                if (entryLocation == 0L) {
+                    // Skip entry since it's not stored on this bookie
+                    entryId++;
+                    continue;
+                }
+
+                ByteBuffer entry = ByteBuffer.wrap(entryLogger.readEntry(ledgerId, entryId, entryLocation));
+
+                readAheadCache.put(ledgerId, entryId, entry);
+                entryId++;
+                count++;
+            }
+        } catch (Exception e) {
+            if (log.isDebugEnabled()) {
+                log.debug("Exception during read ahead: {}@{}: e", new Object[] { ledgerId, entryId, e });
+            }
+        }
+    }
+
+    public ByteBuffer getLastEntry(long ledgerId) throws IOException {
         writeCacheMutex.readLock().lock();
         try {
             // First try to read from the write cache of recent entries
-            Entry<LongPair, ByteBuffer> mapEntry = writeCache.headMap(nextEntryKey).lastEntry();
-            if (mapEntry != null && mapEntry.getKey().first == ledgerId) {
-                return mapEntry.getValue();
+            ByteBuffer entry = writeCache.getLastEntry(ledgerId);
+            if (entry != null) {
+                if (log.isDebugEnabled()) {
+                    long foundLedgerId = entry.getLong(); // ledgedId
+                    long entryId = entry.getLong();
+                    entry.rewind();
+                    log.debug("Found last entry for ledger {} in write cache: {}@{}", new Object[] { ledgerId,
+                            foundLedgerId, entryId });
+                }
+                return entry;
             }
 
             // If there's a flush going on, the entry might be in the flush buffer
-            if (writeCacheBeingFlushed != null) {
-                mapEntry = writeCacheBeingFlushed.headMap(nextEntryKey).lastEntry();
-                if (mapEntry != null && mapEntry.getKey().first == ledgerId) {
-                    return mapEntry.getValue();
+            entry = writeCacheBeingFlushed.getLastEntry(ledgerId);
+            if (entry != null) {
+                if (log.isDebugEnabled()) {
+                    entry.getLong(); // ledgedId
+                    long entryId = entry.getLong();
+                    entry.rewind();
+                    log.debug("Found last entry for ledger {} in write cache being flushed: {}", ledgerId, entryId);
                 }
+                return entry;
             }
         } finally {
             writeCacheMutex.readLock().unlock();
@@ -275,6 +323,8 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
         // Search the last entry in storage
         long lastEntryId = entryLocationIndex.getLastEntryInLedger(ledgerId);
+        log.debug("Found last entry for ledger {} in db: {}", ledgerId, lastEntryId);
+
         long entryLocation = entryLocationIndex.getLocation(ledgerId, lastEntryId);
         byte[] content = entryLogger.readEntry(ledgerId, lastEntryId, entryLocation);
         return ByteBuffer.wrap(content);
@@ -284,7 +334,9 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     public boolean isFlushRequired() {
         writeCacheMutex.readLock().lock();
         try {
-            return !writeCache.isEmpty();
+            // Even if all the entries have been trimmed, we need to trigger a flush so that we can advance our position
+            // in the journal.
+            return !writeCache.isEmpty() || writeCacheSizeTrimmed.get() > 0;
         } finally {
             writeCacheMutex.readLock().unlock();
         }
@@ -292,24 +344,17 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
     @Override
     public synchronized void flush() throws IOException {
-        ConcurrentNavigableMap<LongPair, ByteBuffer> newWriteCache = new ConcurrentSkipListMap<LongPair, ByteBuffer>();
-
         writeCacheMutex.writeLock().lock();
 
-        long sizeToFlush;
         long sizeTrimmed;
         try {
             // First, swap the current write-cache map with an empty one so that writes will go on unaffected
-            cache.startFlush();
-
             // Only a single flush is happening at the same time
-            checkArgument(writeCacheBeingFlushed == null);
-
+            EntryCache tmp = writeCacheBeingFlushed;
             writeCacheBeingFlushed = writeCache;
-            writeCache = newWriteCache;
+            writeCache = tmp;
 
             sizeTrimmed = writeCacheSizeTrimmed.getAndSet(0);
-            sizeToFlush = writeCacheSize.getAndSet(0) - sizeTrimmed;
 
             // Write cache is empty now, so we can accept writes at full speed again
             isThrottlingRequests.set(false);
@@ -317,30 +362,29 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
             writeCacheMutex.writeLock().unlock();
         }
 
+        long sizeToFlush = writeCacheBeingFlushed.size();
         log.info("Flushing entries. size {} Mb -- Already trimmed: {} Mb", sizeToFlush / 1024.0 / 1024,
                 sizeTrimmed / 1024.0 / 1024);
         long start = System.nanoTime();
 
         // Write all the pending entries into the entry logger and collect the offset position for each entry
         Multimap<Long, LongPair> locationMap = ArrayListMultimap.create();
-        for (Entry<LongPair, ByteBuffer> entry : writeCacheBeingFlushed.entrySet()) {
+        for (Entry<LongPair, ByteBuf> entry : writeCacheBeingFlushed.entries()) {
             LongPair ledgerAndEntry = entry.getKey();
-            ByteBuffer content = entry.getValue();
+            ByteBuf content = entry.getValue();
             long ledgerId = ledgerAndEntry.first;
             long entryId = ledgerAndEntry.second;
 
-            long location = entryLogger.addEntry(ledgerId, content.duplicate());
+            long location = entryLogger.addEntry(ledgerId, content.nioBuffer());
             locationMap.put(ledgerId, new LongPair(entryId, location));
         }
-
-        cache.doneFlush();
 
         entryLogger.flush();
 
         entryLocationIndex.addLocations(locationMap);
 
         // Discard all the entry from the write cache, since they're now persisted
-        writeCacheBeingFlushed = null;
+        writeCacheBeingFlushed.clear();
 
         double flushTime = (System.nanoTime() - start) / 1e9;
         double flushThroughput = sizeToFlush / 1024 / 1024 / flushTime;
@@ -358,20 +402,13 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         // Trimming only affects entries that are still in the write cache
         writeCacheMutex.readLock().lock();
         try {
-            NavigableMap<LongPair, ByteBuffer> entriesToDelete = writeCache.subMap(new LongPair(ledgerId, 0), true,
-                    new LongPair(ledgerId, lastEntryId), true);
-
-            long deletedSize = 0;
-            for (ByteBuffer b : entriesToDelete.values()) {
-                deletedSize += b.remaining();
-            }
-
+            long deletedSize = writeCache.trimLedger(ledgerId, lastEntryId);
             writeCacheSizeTrimmed.addAndGet(deletedSize);
-            entriesToDelete.clear();
         } finally {
             writeCacheMutex.readLock().unlock();
         }
 
+        readAheadCache.trimLedger(ledgerId, lastEntryId);
     }
 
     @Override
@@ -381,14 +418,12 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         // Delete entries from this ledger that are still in the write cache
         writeCacheMutex.readLock().lock();
         try {
-            NavigableMap<LongPair, ByteBuffer> entriesToDelete = writeCache.subMap(new LongPair(ledgerId, 0), true,
-                    new LongPair(ledgerId + 1, 0), false);
-
-            entriesToDelete.clear();
+            writeCache.deleteLedger(ledgerId);
         } finally {
             writeCacheMutex.readLock().unlock();
         }
 
+        readAheadCache.deleteLedger(ledgerId);
         entryLocationIndex.delete(ledgerId);
         ledgerIndex.delete(ledgerId);
     }

@@ -95,5 +95,8 @@ public class ConversionTest {
                 }
             }
         }
+
+        interleavedStorage.shutdown();
+        dbStorage.shutdown();
     }
 }

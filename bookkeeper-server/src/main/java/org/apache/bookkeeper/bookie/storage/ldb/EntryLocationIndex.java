@@ -91,7 +91,7 @@ public class EntryLocationIndex implements Closeable {
         return getLedgerIndexPage(ledgerId, entryId).getPosition(entryId);
     }
 
-    private LedgerIndexPage getLedgerIndexPage(long ledgerId, long entryId) throws IOException {
+    LedgerIndexPage getLedgerIndexPage(long ledgerId, long entryId) throws IOException {
         LedgerIndexPage ledgerIndexPage = locationsCache.get(new LongPair(ledgerId, entryId));
         if (ledgerIndexPage != null) {
             log.debug("Found ledger index page for {}@{} in cache", ledgerId, entryId);
@@ -135,6 +135,7 @@ public class EntryLocationIndex implements Closeable {
             // There is no entry in the ledger we are looking into
             throw new Bookie.NoEntryException(ledgerId, 0);
         } else {
+            log.debug("Found last page in storage db for ledger {} : {}", ledgerId, ledgerIndexPage);
             return ledgerIndexPage.getLastEntry();
         }
     }
