@@ -6,7 +6,11 @@ yroot_x86_64_rhel_image: 6.3-20120918
 
 provision_yinst_version: stable
 
-dist_key_file: /home/y/conf/keydb/sherpa_build.keydb
+dist_key_file: /home/tortuga/.ssh/id_dsa
 dist_nomail: true
 dist_ignore_duplicate_package_errors: true
 dist_group: users
+
+yroot_copy_files:
+    /home/y/conf/keydb/tortuga.keydb
+    /home/y/var/tortuga_keys/id_dsa
