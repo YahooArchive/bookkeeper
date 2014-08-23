@@ -234,4 +234,53 @@ public class DbLedgerStorageTest {
 
     }
 
+    @Test
+    public void testRewritingEntries() throws Exception {
+        File tmpDir = File.createTempFile("bkTest", ".dir");
+        tmpDir.delete();
+        tmpDir.mkdir();
+        File curDir = Bookie.getCurrentDirectory(tmpDir);
+        Bookie.checkDirectoryStructure(curDir);
+
+        int gcWaitTime = 1000;
+        ServerConfiguration conf = new ServerConfiguration();
+        conf.setGcWaitTime(gcWaitTime);
+        conf.setAllowLoopback(true);
+        conf.setLedgerStorageClass(DbLedgerStorage.class.getName());
+        conf.setLedgerDirNames(new String[] { tmpDir.toString() });
+        Bookie bookie = new Bookie(conf);
+
+        CompactableLedgerStorage storage = (CompactableLedgerStorage) bookie.getLedgerStorage();
+        assertTrue(storage instanceof DbLedgerStorage);
+
+        storage.setMasterKey(1, "key".getBytes());
+
+        try {
+            storage.getEntry(1, -1);
+            fail("Should throw exception");
+        } catch (Bookie.NoEntryException e) {
+            // ok
+        }
+
+        ByteBuffer entry1 = ByteBuffer.allocate(1024);
+        entry1.putLong(1); // ledger id
+        entry1.putLong(1); // entry id
+        entry1.put("entry-1".getBytes());
+        entry1.flip();
+
+        storage.addEntry(entry1);
+        storage.flush();
+
+        ByteBuffer newEntry1 = ByteBuffer.allocate(1024);
+        newEntry1.putLong(1); // ledger id
+        newEntry1.putLong(1); // entry id
+        newEntry1.put("new-entry-1".getBytes());
+        newEntry1.flip();
+
+        storage.addEntry(newEntry1);
+        storage.flush();
+
+        ByteBuffer response = storage.getEntry(1, 1);
+        assertEquals(entry1, response);
+    }
 }

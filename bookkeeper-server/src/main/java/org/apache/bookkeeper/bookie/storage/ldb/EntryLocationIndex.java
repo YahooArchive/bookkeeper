@@ -9,12 +9,14 @@ import java.util.Set;
 
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
-import org.apache.bookkeeper.bookie.storage.ldb.SortedLruCache.Weighter;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
+import org.apache.bookkeeper.bookie.storage.ldb.SortedLruCache.Weighter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Predicate;
 import com.google.common.collect.ComparisonChain;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
@@ -127,13 +129,13 @@ public class EntryLocationIndex implements Closeable {
         // Search the last entry in storage
         Entry<byte[], byte[]> entry = locationsDb.getFloor(nextEntryKey.toArray());
         if (entry == null) {
-            throw new Bookie.NoEntryException(ledgerId, 0);
+            return -1L;
         }
 
         LedgerIndexPage ledgerIndexPage = new LedgerIndexPage(entry.getKey(), entry.getValue());
         if (ledgerIndexPage.getLedgerId() != ledgerId) {
             // There is no entry in the ledger we are looking into
-            throw new Bookie.NoEntryException(ledgerId, 0);
+            return -1L;
         } else {
             log.debug("Found last page in storage db for ledger {} : {}", ledgerId, ledgerIndexPage);
             return ledgerIndexPage.getLastEntry();
@@ -146,7 +148,24 @@ public class EntryLocationIndex implements Closeable {
         // For each ledger with new entries in the write cache, we write a single record, containing all the
         // offsets for all its own entries
         for (long ledgerId : locationMap.keySet()) {
+            final long lastEntryId = getLastEntryInLedger(ledgerId);
+
             List<LongPair> entries = (List<LongPair>) locationMap.get(ledgerId);
+            if (entries.get(0).first <= lastEntryId) {
+                // The entries are overlapping another ledger index page in the db,
+                // we need to skip inserting the entries since we already have them
+                entries = Lists.newArrayList(Iterables.filter(entries, new Predicate<LongPair>() {
+                    public boolean apply(LongPair item) {
+                        return item.first > lastEntryId;
+                    }
+                }));
+
+                if (entries.isEmpty()) {
+                    // All the entries for this ledger were filtered out
+                    continue;
+                }
+            }
+
             LedgerIndexPage indexPage = new LedgerIndexPage(ledgerId, entries);
 
             log.debug("Adding page to index: {}", indexPage);
@@ -190,7 +209,7 @@ public class EntryLocationIndex implements Closeable {
                 byte[] key = iter.next();
                 if (log.isDebugEnabled()) {
                     log.debug("Deleting ledger index page ({}, {})", LongPair.fromArray(key).first,
-                              LongPair.fromArray(key).second);
+                            LongPair.fromArray(key).second);
                 }
 
                 keys.add(key);
