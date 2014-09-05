@@ -9,6 +9,7 @@ import java.util.List;
 
 import org.apache.bookkeeper.bookie.Bookie.NoEntryException;
 import org.apache.bookkeeper.bookie.storage.ldb.EntryLocationIndex.EntryRange;
+import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.junit.Test;
 
 import com.google.common.collect.ArrayListMultimap;
@@ -71,7 +72,7 @@ public class EntryLocationIndexTest {
         tmpDir.mkdir();
         tmpDir.deleteOnExit();
 
-        EntryLocationIndex idx = new EntryLocationIndex(tmpDir.getAbsolutePath());
+        EntryLocationIndex idx = new EntryLocationIndex(tmpDir.getAbsolutePath(), NullStatsLogger.INSTANCE);
 
         Multimap<Long, LongPair> locations = ArrayListMultimap.create();
 

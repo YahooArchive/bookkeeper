@@ -15,11 +15,13 @@ public class EntryCache {
     private final ConcurrentNavigableMap<LongPair, ByteBuf> cache;
     private final ByteBufAllocator allocator;
     private final AtomicLong size;
+    private final AtomicLong count;
 
     public EntryCache(ByteBufAllocator allocator) {
         this.cache = new ConcurrentSkipListMap<LongPair, ByteBuf>();
         this.allocator = allocator;
         this.size = new AtomicLong(0L);
+        this.count = new AtomicLong(0L);
     }
 
     public void put(long ledgerId, long entryId, ByteBuffer entry) {
@@ -32,6 +34,7 @@ public class EntryCache {
         }
 
         size.addAndGet(buffer.readableBytes());
+        count.incrementAndGet();
     }
 
     public ByteBuffer get(long ledgerId, long entryId) {
@@ -47,6 +50,7 @@ public class EntryCache {
         ByteBuf buf = cache.remove(new LongPair(ledgerId, entryId));
         if (buf != null) {
             size.addAndGet(-buf.readableBytes());
+            count.decrementAndGet();
             buf.release();
         }
     }
@@ -76,6 +80,7 @@ public class EntryCache {
         NavigableMap<LongPair, ByteBuf> entriesToDelete = cache.subMap(start, true, end, endIncluded);
 
         long deletedSize = 0;
+        long deletedCount = 0;
         while (true) {
             Entry<LongPair, ByteBuf> entry = entriesToDelete.pollFirstEntry();
             if (entry == null) {
@@ -83,10 +88,12 @@ public class EntryCache {
             }
 
             deletedSize += entry.getValue().readableBytes();
+            deletedCount++;
             entry.getValue().release();
         }
 
         size.addAndGet(-deletedSize);
+        count.addAndGet(-deletedCount);
         return deletedSize;
     }
 
@@ -102,6 +109,10 @@ public class EntryCache {
         return size.get();
     }
 
+    public long count() {
+        return count.get();
+    }
+
     public void clear() {
         while (true) {
             Entry<LongPair, ByteBuf> entry = cache.pollFirstEntry();
@@ -113,6 +124,7 @@ public class EntryCache {
             size.addAndGet(-content.readableBytes());
             content.release();
         }
+        count.set(0L);
     }
 
     private static ByteBuffer toByteBuffer(ByteBuf buf) {

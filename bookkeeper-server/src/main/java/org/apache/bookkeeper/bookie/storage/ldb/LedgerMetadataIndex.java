@@ -12,6 +12,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorageDataFormats.LedgerData;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
+import org.apache.bookkeeper.stats.Gauge;
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,8 +33,9 @@ public class LedgerMetadataIndex implements Closeable {
     private final LoadingCache<Long, LedgerData> ledgersCache;
 
     private final KeyValueStorage ledgersDb;
+    private StatsLogger stats;
 
-    public LedgerMetadataIndex(String basePath) throws IOException {
+    public LedgerMetadataIndex(String basePath, StatsLogger stats) throws IOException {
         String ledgersPath = FileSystems.getDefault().getPath(basePath, "ledgers").toFile().toString();
         ledgersDb = new KeyValueStorageLevelDB(ledgersPath);
 
@@ -53,6 +56,33 @@ public class LedgerMetadataIndex implements Closeable {
                         }
                     }
                 });
+
+        this.stats = stats;
+        registerStats();
+    }
+
+    public void registerStats() {
+        stats.registerGauge("ledgersCacheSize", new Gauge<Long>() {
+            @Override
+            public Long getDefaultValue() { return 0L; }
+
+            @Override
+            public Long getSample() { return ledgersCache.size(); }
+        });
+        stats.registerGauge("ledgersCacheCount", new Gauge<Long>() {
+            @Override
+            public Long getDefaultValue() { return 0L; }
+
+            @Override
+            public Long getSample() { return ledgersCache.stats().loadCount(); }
+        });
+        stats.registerGauge("ledgersCacheHitRate", new Gauge<Double>() {
+            @Override
+            public Double getDefaultValue() { return 0.0D; }
+
+            @Override
+            public Double getSample() { return ledgersCache.stats().hitRate(); }
+        });
     }
 
     @Override

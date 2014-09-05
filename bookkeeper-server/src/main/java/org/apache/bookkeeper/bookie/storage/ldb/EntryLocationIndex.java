@@ -11,6 +11,8 @@ import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
 import org.apache.bookkeeper.bookie.storage.ldb.SortedLruCache.Weighter;
+import org.apache.bookkeeper.stats.Gauge;
+import org.apache.bookkeeper.stats.StatsLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,8 +74,9 @@ public class EntryLocationIndex implements Closeable {
 
     private final KeyValueStorage locationsDb;
     private final SortedLruCache<LongPair, LedgerIndexPage> locationsCache;
+    private StatsLogger stats;
 
-    public EntryLocationIndex(String basePath) throws IOException {
+    public EntryLocationIndex(String basePath, StatsLogger stats) throws IOException {
         String locationsDbPath = FileSystems.getDefault().getPath(basePath, "locations").toFile().toString();
         locationsDb = new KeyValueStorageLevelDB(locationsDbPath);
 
@@ -81,6 +84,26 @@ public class EntryLocationIndex implements Closeable {
             public long getSize(LedgerIndexPage ledgerIndexPage) {
                 return ledgerIndexPage.getNumberOfEntries();
             }
+        });
+
+        this.stats = stats;
+        registerStats();
+    }
+
+    public void registerStats() {
+        stats.registerGauge("locationsCacheSize", new Gauge<Long>() {
+            @Override
+            public Long getDefaultValue() { return 0L; }
+
+            @Override
+            public Long getSample() { return locationsCache.getSize(); }
+        });
+        stats.registerGauge("locationsCacheCount", new Gauge<Long>() {
+            @Override
+            public Long getDefaultValue() { return 0L; }
+
+            @Override
+            public Long getSample() { return locationsCache.getNumberOfEntries(); }
         });
     }
 

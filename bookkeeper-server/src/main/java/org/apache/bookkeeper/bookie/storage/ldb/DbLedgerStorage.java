@@ -26,7 +26,10 @@ import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorageDataFormats.Ledge
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.jmx.BKMBeanInfo;
 import org.apache.bookkeeper.proto.BookieProtocol;
+import org.apache.bookkeeper.stats.Gauge;
+import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
+import org.apache.bookkeeper.util.MathUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -82,6 +85,9 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     private int readAheadCacheBatchSize;
     private boolean trimEnabled;
 
+    private StatsLogger stats;
+    private OpStatsLogger trimOpStats;
+
     @Override
     public void initialize(ServerConfiguration conf,
                            GarbageCollectorThread.LedgerManagerProvider ledgerManagerProvider,
@@ -96,15 +102,58 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         readAheadCacheMaxSize = conf.getLong(READ_AHEAD_CACHE_MAX_SIZE_MB, DEFAULT_READ_AHEAD_CACHE_MAX_SIZE_MB) * MB;
         readAheadCacheBatchSize = conf.getInt(READ_AHEAD_CACHE_BATCH_SIZE, DEFAULT_READ_AHEAD_CACHE_BATCH_SIZE);
         trimEnabled = conf.getBoolean(TRIM_ENABLED, false);
+        this.stats = stats;
 
         log.info("Started Db Ledger Storage - Write cache size: {} Mb - Trim enabled: {}",
                 writeCacheMaxSize / 1024 / 1024, trimEnabled);
 
-        ledgerIndex = new LedgerMetadataIndex(baseDir);
-        entryLocationIndex = new EntryLocationIndex(baseDir);
+        ledgerIndex = new LedgerMetadataIndex(baseDir, stats);
+        entryLocationIndex = new EntryLocationIndex(baseDir, stats);
 
         entryLogger = new EntryLogger(conf, ledgerDirsManager);
         gcThread = new GarbageCollectorThread(conf, ledgerManagerProvider, this);
+
+        registerStats();
+    }
+
+    public void registerStats() {
+        stats.registerGauge("writeCacheSize", new Gauge<Long>() {
+            @Override
+            public Long getDefaultValue() { return 0L; }
+
+            @Override
+            public Long getSample() { return writeCache.size() + writeCacheBeingFlushed.size(); }
+        });
+        stats.registerGauge("writeCacheCount", new Gauge<Long>() {
+            @Override
+            public Long getDefaultValue() { return 0L; }
+
+            @Override
+            public Long getSample() { return writeCache.count() + writeCacheBeingFlushed.count(); }
+        });
+        stats.registerGauge("readCacheSize", new Gauge<Long>() {
+            @Override
+            public Long getDefaultValue() { return 0L; }
+
+            @Override
+            public Long getSample() { return readAheadCache.size(); }
+        });
+        stats.registerGauge("readCacheCount", new Gauge<Long>() {
+            @Override
+            public Long getDefaultValue() { return 0L; }
+
+            @Override
+            public Long getSample() { return readAheadCache.count(); }
+        });
+        stats.registerGauge("trimSize", new Gauge<Long>() {
+            @Override
+            public Long getDefaultValue() { return 0L; }
+
+            @Override
+            public Long getSample() { return writeCacheSizeTrimmed.get(); }
+        });
+
+        trimOpStats = stats.getOpStatsLogger("trim-op");
     }
 
     @Override
@@ -399,12 +448,16 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         }
 
         log.debug("Trim entries {}@{}", ledgerId, lastEntryId);
+        long startTime = MathUtils.nowInNano();
 
         // Trimming only affects entries that are still in the write cache
         writeCacheMutex.readLock().lock();
         try {
             long deletedSize = writeCache.trimLedger(ledgerId, lastEntryId);
             writeCacheSizeTrimmed.addAndGet(deletedSize);
+            trimOpStats.registerSuccessfulEvent(MathUtils.elapsedNanos(startTime));
+        } catch(Exception e) {
+            trimOpStats.registerFailedEvent(MathUtils.elapsedNanos(startTime));
         } finally {
             writeCacheMutex.readLock().unlock();
         }

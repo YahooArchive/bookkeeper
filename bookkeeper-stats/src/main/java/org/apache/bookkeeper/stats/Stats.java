@@ -35,6 +35,7 @@ public class Stats {
 
     public static void loadStatsProvider(Configuration conf) {
         String className = conf.getString(STATS_PROVIDER_CLASS);
+        LOG.debug("Using stats provider: {}", className);
         if (className != null) {
             try {
                 Class cls = Class.forName(className);
