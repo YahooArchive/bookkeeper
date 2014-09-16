@@ -27,11 +27,15 @@ import org.apache.bookkeeper.util.DiskChecker.DiskOutOfSpaceException;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Test to verify {@link DiskChecker}
  * 
  */
 public class TestDiskChecker {
+    static final Logger LOG = LoggerFactory.getLogger(TestDiskChecker.class);
 
     DiskChecker diskChecker;
 
@@ -48,8 +52,8 @@ public class TestDiskChecker {
         File file = File.createTempFile("DiskCheck", "test");
         long usableSpace = file.getUsableSpace();
         long totalSpace = file.getTotalSpace();
-        diskChecker
-                .setDiskSpaceThreshold((1f - ((float) usableSpace / (float) totalSpace)) - 0.05f);
+        float threshold = (1f - ((float) usableSpace / (float) totalSpace)) * 0.5f;
+        diskChecker.setDiskSpaceThreshold(threshold);
         diskChecker.checkDiskFull(file);
     }
 
@@ -62,8 +66,8 @@ public class TestDiskChecker {
         File file = File.createTempFile("DiskCheck", "test");
         long usableSpace = file.getUsableSpace();
         long totalSpace = file.getTotalSpace();
-        diskChecker
-                .setDiskSpaceThreshold((1f - ((float) usableSpace / (float) totalSpace)) - 0.05f);
+        float threshold = (1f - ((float) usableSpace / (float) totalSpace)) * 0.5f;
+        diskChecker.setDiskSpaceThreshold(threshold);
         assertTrue(file.delete());
         diskChecker.checkDiskFull(file);
     }
