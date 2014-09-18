@@ -183,21 +183,13 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
     @Override
     public boolean ledgerExists(long ledgerId) throws IOException {
-        LedgerData ledgerData = ledgerIndex.get(ledgerId);
-        log.debug("Ledger exists. ledger: {} : {}", ledgerId, ledgerData.getExists());
-        return ledgerData.getExists();
-    }
-
-    @Override
-    public boolean setFenced(long ledgerId) throws IOException {
-        log.debug("Set fenced. ledger: {}", ledgerId);
-        LedgerData ledgerData = ledgerIndex.get(ledgerId);
-        if (ledgerData.getFenced()) {
+        try {
+            LedgerData ledgerData = ledgerIndex.get(ledgerId);
+            log.debug("Ledger exists. ledger: {} : {}", ledgerId, ledgerData.getExists());
+            return ledgerData.getExists();
+        } catch (Bookie.NoLedgerException nle) {
+            // ledger does not exist
             return false;
-        } else {
-            ledgerData = LedgerData.newBuilder(ledgerData).setFenced(true).build();
-            ledgerIndex.set(ledgerId, ledgerData);
-            return true;
         }
     }
 
@@ -208,11 +200,15 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     }
 
     @Override
+    public boolean setFenced(long ledgerId) throws IOException {
+        log.debug("Set fenced. ledger: {}", ledgerId);
+        return ledgerIndex.setFenced(ledgerId);
+    }
+
+    @Override
     public void setMasterKey(long ledgerId, byte[] masterKey) throws IOException {
         log.debug("Set master key. ledger: {}", ledgerId);
-        LedgerData.Builder ledgerData = LedgerData.newBuilder(ledgerIndex.get(ledgerId));
-        ledgerData.setMasterKey(ByteString.copyFrom(masterKey));
-        ledgerIndex.set(ledgerId, ledgerData.build());
+        ledgerIndex.setMasterKey(ledgerId, masterKey);
     }
 
     @Override
@@ -242,6 +238,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         if (writeCache.size() > writeCacheMaxSize && isThrottlingRequests.compareAndSet(false, true)) {
             // Trigger an early flush in background
             executor.submit(new Runnable() {
+                @Override
                 public void run() {
                     try {
                         flush();

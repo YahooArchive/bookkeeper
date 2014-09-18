@@ -6,10 +6,15 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.FileSystems;
+import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
+import org.apache.bookkeeper.bookie.Bookie;
+import org.apache.bookkeeper.bookie.BookieException;
 import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorageDataFormats.LedgerData;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
 import org.apache.bookkeeper.stats.Gauge;
@@ -34,13 +39,16 @@ public class LedgerMetadataIndex implements Closeable {
 
     private final KeyValueStorage ledgersDb;
     private StatsLogger stats;
-
+    private final ConcurrentHashMap<Long, ReentrantLock> dbWriteLocks = new ConcurrentHashMap<Long, ReentrantLock>();
+    private final static int DB_LOCK_BUCKETS = 16;
+    
     public LedgerMetadataIndex(String basePath, StatsLogger stats) throws IOException {
         String ledgersPath = FileSystems.getDefault().getPath(basePath, "ledgers").toFile().toString();
         ledgersDb = new KeyValueStorageLevelDB(ledgersPath);
 
         ledgersCache = CacheBuilder.newBuilder().expireAfterAccess(1, TimeUnit.MINUTES)
                 .build(new CacheLoader<Long, LedgerData>() {
+                    @Override
                     public LedgerData load(Long ledgerId) throws Exception {
                         log.debug("Loading ledger data from db. ledger {}", ledgerId);
                         byte[] ledgerKey = toArray(ledgerId);
@@ -49,14 +57,17 @@ public class LedgerMetadataIndex implements Closeable {
                             log.debug("Found in db. ledger {}", ledgerId);
                             return LedgerData.parseFrom(result);
                         } else {
-                            // No ledger was found on the db, return a dummy LedgerData marked as non-existent
+                            // No ledger was found on the db, throws an exception
                             log.debug("Not Found in db. ledger {}", ledgerId);
-                            return LedgerData.newBuilder().setExists(false).setFenced(false)
-                                    .setMasterKey(ByteString.copyFrom(new byte[0])).build();
+                            throw new Bookie.NoLedgerException(ledgerId);
                         }
                     }
                 });
 
+        for(long i = 0; i < DB_LOCK_BUCKETS; i++) {
+            dbWriteLocks.put(i, new ReentrantLock());
+        }
+        
         this.stats = stats;
         registerStats();
     }
@@ -95,19 +106,32 @@ public class LedgerMetadataIndex implements Closeable {
         try {
             return ledgersCache.get(ledgerId);
         } catch (ExecutionException e) {
+            if (e.getCause() instanceof Bookie.NoLedgerException) {
+                throw (Bookie.NoLedgerException) (e.getCause());
+            }
             throw new IOException(e.getCause());
         }
     }
 
     public void set(long ledgerId, LedgerData ledgerData) throws IOException {
         ledgerData = LedgerData.newBuilder(ledgerData).setExists(true).build();
-        ledgersDb.put(toArray(ledgerId), ledgerData.toByteArray());
-        ledgersCache.invalidate(ledgerId);
+        dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).lock();
+        try {
+            ledgersDb.put(toArray(ledgerId), ledgerData.toByteArray());
+            ledgersCache.invalidate(ledgerId);
+        } finally {
+            dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).unlock();
+        }
     }
 
     public void delete(long ledgerId) throws IOException {
-        ledgersDb.delete(toArray(ledgerId));
-        ledgersCache.invalidate(ledgerId);
+        dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).lock();
+        try {
+            ledgersDb.delete(toArray(ledgerId));
+            ledgersCache.invalidate(ledgerId);
+        } finally {
+            dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).unlock();
+        }
     }
 
     public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId)
@@ -135,4 +159,50 @@ public class LedgerMetadataIndex implements Closeable {
     }
 
     private static final Logger log = LoggerFactory.getLogger(LedgerMetadataIndex.class);
+
+    public boolean setFenced(final long ledgerId) throws IOException {
+        dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).lock();
+        try {
+            LedgerData curData = get(ledgerId);
+            if (curData.getFenced()) {
+                return false;
+            }
+            curData = LedgerData.newBuilder(curData).setFenced(true).build();
+            ledgersDb.put(toArray(ledgerId), curData.toByteArray());
+            ledgersCache.invalidate(ledgerId);
+        } finally {
+            dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).unlock();
+        }
+        
+        return true;
+    }
+
+    public void setMasterKey(final long ledgerId, final byte[] masterKey) throws IOException {
+        dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).lock();
+        try {
+            try {
+                LedgerData curData = ledgersCache.get(ledgerId);
+                if (!Arrays.equals(curData.getMasterKey().toByteArray(), masterKey)) {
+                    log.debug("Ledger {} masterKey in db can only be set once.", ledgerId);
+                    throw BookieException.create(BookieException.Code.IllegalOpException);
+                }
+            } catch (ExecutionException ee) {
+                if (ee.getCause() instanceof Bookie.NoLedgerException) {
+                    // need to insert new entry in ledgersDb
+                    LedgerData newData = LedgerData.newBuilder().setExists(true).setFenced(false)
+                            .setMasterKey(ByteString.copyFrom(masterKey)).build();
+                    ledgersDb.put(toArray(ledgerId), newData.toByteArray());
+                    return;
+                }
+                log.error("Set masterKey failed for Ledger {} with error: {}", ledgerId, ee.getCause().getMessage());
+                throw new IOException(ee.getCause());
+            } catch (Exception e) {
+                log.error("Set masterKey failed for ledger {} with error: {}", ledgerId, e.getMessage());
+                throw new IOException(e);
+            }
+        } finally {
+            dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).unlock();
+        }
+    }
+
 }

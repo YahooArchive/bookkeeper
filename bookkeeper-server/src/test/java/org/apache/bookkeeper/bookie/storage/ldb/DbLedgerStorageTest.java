@@ -5,11 +5,13 @@ import static junit.framework.Assert.assertTrue;
 import static junit.framework.Assert.fail;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.Bookie.NoEntryException;
+import org.apache.bookkeeper.bookie.BookieException;
 import org.apache.bookkeeper.bookie.EntryLogger;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
@@ -41,10 +43,30 @@ public class DbLedgerStorageTest {
         assertTrue(storage instanceof DbLedgerStorage);
 
         assertEquals(false, storage.ledgerExists(3));
-        assertEquals(false, storage.isFenced(3));
+        try {
+            storage.isFenced(3);
+            fail("should have failed");
+        } catch (Bookie.NoLedgerException nle) {
+            // OK
+        }
         assertEquals(false, storage.ledgerExists(3));
-        assertEquals(true, storage.setFenced(3));
+        try {
+            storage.setFenced(3);
+            fail("should have failed");
+        } catch (Bookie.NoLedgerException nle) {
+            // OK
+        }
+        storage.setMasterKey(3, "key".getBytes());
+        try {
+            storage.setMasterKey(3, "other-key".getBytes());
+            fail("should have failed");
+        } catch (IOException ioe) {
+            assertTrue(ioe.getCause() instanceof BookieException.BookieIllegalOpException);
+        }
+        // setting the same key is NOOP
+        storage.setMasterKey(3,  "key".getBytes());
         assertEquals(true, storage.ledgerExists(3));
+        assertEquals(true, storage.setFenced(3));
         assertEquals(true, storage.isFenced(3));
         assertEquals(false, storage.setFenced(3));
 
