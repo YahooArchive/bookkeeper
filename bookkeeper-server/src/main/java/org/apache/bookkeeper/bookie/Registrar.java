@@ -283,6 +283,9 @@ class Registrar implements Closeable {
 
         public State handleEvent(ZooKeeperError e) {
             closeZooKeeper();
+
+            // Trigger restarting of registration
+            fsm.sendEvent(new RegisterEvent());
             return new RegisteringState(fsm);
         }
     }
@@ -382,6 +385,9 @@ class Registrar implements Closeable {
 
         public State handleEvent(ZooKeeperError e) {
             closeZooKeeper();
+
+            // Trigger restarting of registration
+            fsm.sendEvent(new RegisterReadOnlyEvent());
             return new RegisteringReadOnlyState(fsm);
         }
 
