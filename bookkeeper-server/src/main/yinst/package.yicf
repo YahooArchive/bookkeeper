@@ -12,6 +12,7 @@ SHORT_DESC = Cloud messaging bookkeeper build
 LONG_DESC = `cat src/main/yinst/README`
 CUSTODIAN = cloud-messaging-devel@yahoo-inc.com http://twiki.corp.yahoo.com/view/Messaging/CloudMessagingService
 PACKAGE_OS_SPECIFIC = no
+SRCDIRS = .
 
 YINST bug-product Cloud Messaging Service
 YINST bug-component General
