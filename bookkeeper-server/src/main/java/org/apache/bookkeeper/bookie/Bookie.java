@@ -82,6 +82,7 @@ import static org.apache.bookkeeper.bookie.BookKeeperServerStats.LD_INDEX_SCOPE;
 import static org.apache.bookkeeper.bookie.BookKeeperServerStats.READ_BYTES;
 import static org.apache.bookkeeper.bookie.BookKeeperServerStats.SERVER_STATUS;
 import static org.apache.bookkeeper.bookie.BookKeeperServerStats.WRITE_BYTES;
+import static org.apache.bookkeeper.bookie.BookKeeperServerStats.JOURNAL_SCOPE;
 
 /**
  * Implements a bookie.
@@ -473,7 +474,8 @@ public class Bookie extends BookieCriticalThread {
         // directories are full, would throws exception and fail bookie startup.
         this.ledgerDirsManager.init();
         // instantiate the journal
-        journal = new Journal(conf, ledgerDirsManager);
+        journal = new Journal(conf, ledgerDirsManager, statsLogger.scope(JOURNAL_SCOPE));
+
         // Check the type of storage.
         if (conf.getSortedLedgerStorageEnabled()) {
             ledgerStorage = new SortedLedgerStorage(conf, ledgerManager,
