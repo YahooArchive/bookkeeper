@@ -37,6 +37,7 @@ public interface BookKeeperServerStats {
     public final static String READ_ENTRY_FENCE_READ = "READ_ENTRY_FENCE_READ";
 
     // Journal Stats
+    public final static String JOURNAL_SCOPE = "journal";
     public final static String JOURNAL_ADD_ENTRY = "JOURNAL_ADD_ENTRY";
     public final static String JOURNAL_MEM_ADD_ENTRY = "JOURNAL_MEM_ADD_ENTRY";
     public final static String JOURNAL_PREALLOCATION = "JOURNAL_PREALLOCATION";
