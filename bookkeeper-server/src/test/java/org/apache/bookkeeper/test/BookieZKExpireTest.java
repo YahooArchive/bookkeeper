@@ -22,16 +22,19 @@
 package org.apache.bookkeeper.test;
 
 import java.io.File;
+import java.util.HashSet;
+import java.util.List;
+
+import org.apache.bookkeeper.bookie.Bookie;
+import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.proto.BookieServer;
+import org.apache.bookkeeper.util.ZkUtils;
+import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
+import org.apache.zookeeper.ZooKeeper;
 import org.junit.Test;
-import org.junit.Before;
-import org.junit.After;
 import static org.junit.Assert.*;
 
-import org.apache.bookkeeper.conf.ServerConfiguration;
-import java.util.HashSet;
-import org.apache.bookkeeper.proto.BookieServer;
-import org.apache.bookkeeper.bookie.Bookie;
-import org.apache.bookkeeper.util.IOUtils;
+import com.google.common.collect.Lists;
 
 public class BookieZKExpireTest extends BookKeeperClusterTestCase {
 
@@ -43,7 +46,7 @@ public class BookieZKExpireTest extends BookKeeperClusterTestCase {
     }
 
     @SuppressWarnings("deprecation")
-    @Test(timeout=60000)
+    @Test(timeout = 60000)
     public void testBookieServerZKExpireBehaviour() throws Exception {
         BookieServer server = null;
         try {
@@ -51,16 +54,17 @@ public class BookieZKExpireTest extends BookKeeperClusterTestCase {
 
             HashSet<Thread> threadset = new HashSet<Thread>();
             int threadCount = Thread.activeCount();
-            Thread threads[] = new Thread[threadCount*2];
+            Thread threads[] = new Thread[threadCount * 2];
             threadCount = Thread.enumerate(threads);
-            for(int i = 0; i < threadCount; i++) {
+            for (int i = 0; i < threadCount; i++) {
                 if (threads[i].getName().indexOf("SendThread") != -1) {
                     threadset.add(threads[i]);
                 }
             }
 
             ServerConfiguration conf = newServerConfiguration(PortManager.nextFreePort(),
-                                                              zkUtil.getZooKeeperConnectString(), f, new File[] { f });
+                    zkUtil.getZooKeeperConnectString(), f, new File[] { f });
+            conf.setGcWaitTime(60000);
             server = new BookieServer(conf);
             server.start();
 
@@ -71,34 +75,43 @@ public class BookieZKExpireTest extends BookKeeperClusterTestCase {
                     fail("Bookie never started");
                 }
             }
-            Thread sendthread = null;
+
+            List<Thread> sendThreads = Lists.newArrayList();
             threadCount = Thread.activeCount();
-            threads = new Thread[threadCount*2];
+            threads = new Thread[threadCount * 2];
             threadCount = Thread.enumerate(threads);
-            for(int i = 0; i < threadCount; i++) {
-                if (threads[i].getName().indexOf("SendThread") != -1
-                        && !threadset.contains(threads[i])) {
-                    sendthread = threads[i];
+            for (int i = 0; i < threadCount; i++) {
+                if (threads[i].getName().indexOf("SendThread") != -1 && !threadset.contains(threads[i])) {
+                    sendThreads.add(threads[i]);
                     break;
                 }
             }
-            assertNotNull("Send thread not found", sendthread);
+            assertFalse("Send thread not found", sendThreads.isEmpty());
 
-            sendthread.suspend();
-            Thread.sleep(2*conf.getZkTimeout());
-            sendthread.resume();
+            for (Thread sendThread : sendThreads) {
+                sendThread.suspend();
+            }
+
+            Thread.sleep(2 * conf.getZkTimeout());
+
+            for (Thread sendThread : sendThreads) {
+                sendThread.resume();
+            }
 
             // allow watcher thread to run
-            secondsToWait = 20;
-            while (server.isBookieRunning()
-                   || server.isRunning()) {
-                Thread.sleep(1000);
-                if (secondsToWait-- <= 0) {
-                    break;
-                }
-            }
-            assertFalse("Bookie should have shutdown on losing zk session", server.isBookieRunning());
-            assertFalse("Bookie Server should have shutdown on losing zk session", server.isRunning());
+            Thread.sleep(1000);
+
+            assertTrue("Bookie should not have shutdown on losing zk session", server.isBookieRunning());
+            assertTrue("Bookie Server should not have shutdown on losing zk session", server.isRunning());
+
+            // Check that the bookie registration z-node has been re-created
+            String myId = Bookie.getBookieAddress(conf).toString();
+            String zkBookieRegPath = conf.getZkAvailableBookiesPath() + "/" + myId;
+            ZooKeeper zkc = ZkUtils
+                    .createConnectedZookeeperClient(conf.getZkServers(), new ZooKeeperWatcherBase(10000));
+            assertTrue("Bookie did not register again after zk session expired",
+                    zkc.exists(zkBookieRegPath, null) != null);
+            zkc.close();
         } finally {
             server.shutdown();
         }
