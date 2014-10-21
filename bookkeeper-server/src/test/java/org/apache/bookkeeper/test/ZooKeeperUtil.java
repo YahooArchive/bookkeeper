@@ -141,20 +141,24 @@ public class ZooKeeperUtil {
         zk2.close();
     }
 
+
     public void stopServer() throws Exception {
         if (zkc != null) {
             zkc.close();
+            zkc = null;
         }
 
         // shutdown ZK server
         if (serverFactory != null) {
             serverFactory.shutdown();
             assertTrue("waiting for server down",
-                    ClientBase.waitForServerDown(getZooKeeperConnectString(),
-                            ClientBase.CONNECTION_TIMEOUT));
+                       ClientBase.waitForServerDown(getZooKeeperConnectString(),
+                                                    ClientBase.CONNECTION_TIMEOUT));
+            serverFactory = null;
         }
         if (zks != null) {
             zks.getTxnLogFactory().close();
+            zks = null;
         }
     }
 
