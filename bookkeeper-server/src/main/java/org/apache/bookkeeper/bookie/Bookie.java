@@ -47,15 +47,14 @@ import org.apache.bookkeeper.bookie.LedgerDirsManager.NoWritableLedgerDirExcepti
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.jmx.BKMBeanInfo;
 import org.apache.bookkeeper.jmx.BKMBeanRegistry;
-import org.apache.bookkeeper.meta.LedgerManager;
-import org.apache.bookkeeper.meta.LedgerManagerFactory;
+
 import org.apache.bookkeeper.net.BookieSocketAddress;
+
 import org.apache.bookkeeper.net.DNS;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.WriteCallback;
 import org.apache.bookkeeper.stats.Counter;
 import org.apache.bookkeeper.stats.Gauge;
 import org.apache.bookkeeper.stats.NullStatsLogger;
-import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.util.BookKeeperConstants;
 import org.apache.bookkeeper.util.IOUtils;
@@ -68,11 +67,7 @@ import org.apache.commons.io.FileUtils;
 
 import org.apache.zookeeper.KeeperException;
 
-import org.apache.zookeeper.WatchedEvent;
-import org.apache.zookeeper.Watcher;
-
 import org.apache.zookeeper.ZooKeeper;
-import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -98,8 +93,6 @@ public class Bookie extends BookieCriticalThread {
     final ServerConfiguration conf;
 
     final SyncThread syncThread;
-    final LedgerManagerFactory ledgerManagerFactory;
-    final LedgerManager ledgerManager;
     final LedgerStorage ledgerStorage;
     final Journal journal;
 
@@ -110,9 +103,6 @@ public class Bookie extends BookieCriticalThread {
 
     private final LedgerDirsManager ledgerDirsManager;
     private LedgerDirsManager indexDirsManager;
-
-    // ZooKeeper client instance for the Bookie
-    ZooKeeper zk;
 
     // Running flag
     private volatile boolean running = false;
@@ -468,11 +458,11 @@ public class Bookie extends BookieCriticalThread {
         }
 
         // instantiate zookeeper client to initialize ledger manager
-        this.zk = instantiateZookeeperClient(conf);
-        checkEnvironment(this.zk);
-        ledgerManagerFactory = LedgerManagerFactory.newLedgerManagerFactory(conf, this.zk);
-        LOG.info("instantiate ledger manager {}", ledgerManagerFactory.getClass().getName());
-        ledgerManager = ledgerManagerFactory.newLedgerManager();
+        ZooKeeper zk = instantiateZookeeperClient(conf);
+        checkEnvironment(zk);
+        if (zk != null) {
+            zk.close();
+        }
 
         // Initialise ledgerDirManager. This would look through all the
         // configured directories. When disk errors or all the ledger
@@ -486,14 +476,14 @@ public class Bookie extends BookieCriticalThread {
         if (ledgerStorageClass.equals(InterleavedLedgerStorage.class.getName())
             && conf.getSortedLedgerStorageEnabled()) {
             ledgerStorage = new SortedLedgerStorage();
-            ledgerStorage.initialize(conf, ledgerManager,
+            ledgerStorage.initialize(conf, new GarbageCollectorThread.LedgerManagerProviderImpl(conf),
                                      ledgerDirsManager, indexDirsManager,
                                      journal, statsLogger);
         } else {
             LOG.info("using ledger storage: {}", ledgerStorageClass);
             ledgerStorage = LedgerStorageFactory.createLedgerStorage(ledgerStorageClass);
-            ledgerStorage.initialize(conf, ledgerManager, ledgerDirsManager,
-                                     indexDirsManager, journal, statsLogger.scope(STORAGE_SCOPE));
+            ledgerStorage.initialize(conf, new GarbageCollectorThread.LedgerManagerProviderImpl(conf),
+                                     ledgerDirsManager, indexDirsManager, journal, statsLogger.scope(STORAGE_SCOPE));
         }
         syncThread = new SyncThread(conf, getLedgerDirsListener(),
                                     ledgerStorage, journal);
@@ -739,8 +729,8 @@ public class Bookie extends BookieCriticalThread {
             LOG.warn("No ZK servers passed to Bookie constructor so BookKeeper clients won't know about this server!");
             return null;
         }
-        // Create the ZooKeeper client instance
-        return newZookeeper(conf.getZkServers(), conf.getZkTimeout());
+        ZooKeeperWatcherBase w = new ZooKeeperWatcherBase(conf.getZkTimeout()) {};
+        return ZkUtils.createConnectedZookeeperClient(conf.getZkServers(), w);
     }
 
     /**
@@ -812,44 +802,6 @@ public class Bookie extends BookieCriticalThread {
      */
     public boolean isReadOnly() {
         return readOnly.get();
-    }
-
-    /**
-     * Create a new zookeeper client to zk cluster.
-     *
-     * <p>
-     * Bookie Server just used zk client when syncing ledgers for garbage collection.
-     * So when zk client is expired, it means this bookie server is not available in
-     * bookie server list. The bookie client will be notified for its expiration. No
-     * more bookie request will be sent to this server. So it's better to exit when zk
-     * expired.
-     * </p>
-     * <p>
-     * Since there are lots of bk operations cached in queue, so we wait for all the operations
-     * are processed and quit. It is done by calling <b>shutdown</b>.
-     * </p>
-     *
-     * @param zkServers the quorum list of zk servers
-     * @param sessionTimeout session timeout of zk connection
-     *
-     * @return zk client instance
-     */
-    private ZooKeeper newZookeeper(final String zkServers,
-            final int sessionTimeout) throws IOException, InterruptedException,
-            KeeperException {
-        ZooKeeperWatcherBase w = new ZooKeeperWatcherBase(conf.getZkTimeout()) {
-            @Override
-            public void process(WatchedEvent event) {
-                // Check for expired connection.
-                if (event.getState().equals(Watcher.Event.KeeperState.Expired)) {
-                    LOG.error("ZK client connection to the ZK server has expired!");
-                    shutdown(ExitCode.ZK_EXPIRED);
-                } else {
-                    super.process(event);
-                }
-            }
-        };
-        return ZkUtils.createConnectedZookeeperClient(zkServers, w);
     }
 
     public boolean isRunning() {
@@ -929,22 +881,12 @@ public class Bookie extends BookieCriticalThread {
                 // Shutdown the EntryLogger which has the GarbageCollector Thread running
                 ledgerStorage.shutdown();
 
-                // close Ledger Manager
-                try {
-                    ledgerManager.close();
-                    ledgerManagerFactory.uninitialize();
-                } catch (IOException ie) {
-                    LOG.error("Failed to close active ledger manager : ", ie);
-                }
-
                 //Shutdown disk checker
                 ledgerDirsManager.shutdown();
                 if (indexDirsManager != ledgerDirsManager) {
                     indexDirsManager.shutdown();
                 }
 
-                // Shutdown the ZK client
-                if(zk != null) zk.close();
             }
         } catch (InterruptedException ie) {
             LOG.error("Interrupted during shutting down bookie : ", ie);
