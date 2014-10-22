@@ -208,7 +208,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         }
         InterleavedLedgerStorage storage = new InterleavedLedgerStorage();
         storage.initialize(conf,
-                LedgerManagerFactory.newLedgerManagerFactory(conf, zkc).newLedgerManager(),
+                new GarbageCollectorThread.LedgerManagerProviderImpl(conf),
                 dirManager, dirManager, cp, NullStatsLogger.INSTANCE);
         storage.start();
         long startTime = MathUtils.now();
@@ -369,7 +369,8 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         tearDown(); // I dont want the test infrastructure
         ServerConfiguration conf = TestBKConfiguration.newServerConfiguration();
         final Set<Long> ledgers = Collections.newSetFromMap(new ConcurrentHashMap<Long, Boolean>());
-        LedgerManager manager = getLedgerManager(ledgers);
+        GarbageCollectorThread.LedgerManagerProvider managerProv
+            = new MockLedgerManagerProvider(ledgers);
 
         File tmpDir = createTempDir("bkTest", ".dir");
         File curDir = Bookie.getCurrentDirectory(tmpDir);
@@ -413,7 +414,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         LedgerDirsManager dirs = new LedgerDirsManager(conf, conf.getLedgerDirs());
         assertFalse("Log shouldnt exist", log0.exists());
         InterleavedLedgerStorage storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs, dirs, checkpointSource, NullStatsLogger.INSTANCE);
+        storage.initialize(conf, managerProv, dirs, dirs, checkpointSource, NullStatsLogger.INSTANCE);
         ledgers.add(1l);
         ledgers.add(2l);
         ledgers.add(3l);
@@ -432,7 +433,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         ledgers.remove(3l);
 
         storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs, dirs, checkpointSource, NullStatsLogger.INSTANCE);
+        storage.initialize(conf, managerProv, dirs, dirs, checkpointSource, NullStatsLogger.INSTANCE);
         storage.start();
         for (int i = 0; i < 10; i++) {
             if (!log0.exists()) {
@@ -448,12 +449,26 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         storage.addEntry(genEntry(4, 1, ENTRY_SIZE)); // force ledger 1 page to flush
 
         storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs, dirs, checkpointSource, NullStatsLogger.INSTANCE);
+        storage.initialize(conf, managerProv, dirs, dirs, checkpointSource, NullStatsLogger.INSTANCE);
         storage.getEntry(1, 1); // entry should exist
     }
 
-    private LedgerManager getLedgerManager(final Set<Long> ledgers) {
-        LedgerManager manager = new LedgerManager() {
+    public static class MockLedgerManagerProvider
+        implements GarbageCollectorThread.LedgerManagerProvider {
+        final Set<Long> ledgers;
+
+        MockLedgerManagerProvider(Set<Long> ledgers) {
+            this.ledgers = ledgers;
+        }
+
+        void unsupported() {
+            LOG.error("Unsupported operation called", new Exception());
+            throw new RuntimeException("Unsupported op");
+        }
+
+        @Override
+        public LedgerManager getLedgerManager() {
+            return new LedgerManager() {
                 @Override
                 public void createLedger(LedgerMetadata metadata, GenericCallback<Long> cb) {
                     unsupported();
@@ -491,10 +506,6 @@ public class CompactionTest extends BookKeeperClusterTestCase {
                 @Override
                 public void close() throws IOException {}
 
-                void unsupported() {
-                    LOG.error("Unsupported operation called", new Exception());
-                    throw new RuntimeException("Unsupported op");
-                }
                 @Override
                 public LedgerRangeIterator getLedgerRanges() {
                     final AtomicBoolean hasnext = new AtomicBoolean(true);
@@ -511,8 +522,11 @@ public class CompactionTest extends BookKeeperClusterTestCase {
                     };
                  }
             };
-        return manager;
+        }
+
+        public void releaseResources() throws IOException, InterruptedException {}
     }
+
 
     /**
      * Test that compaction should execute silently when there is no entry logs
@@ -530,7 +544,9 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         LedgerDirsManager dirs = new LedgerDirsManager(conf, conf.getLedgerDirs());
         final Set<Long> ledgers = Collections
                 .newSetFromMap(new ConcurrentHashMap<Long, Boolean>());
-        LedgerManager manager = getLedgerManager(ledgers);
+        GarbageCollectorThread.LedgerManagerProvider managerProv
+            = new MockLedgerManagerProvider(ledgers);
+
         CheckpointSource checkpointSource = new CheckpointSource() {
 
             @Override
@@ -544,7 +560,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
             }
         };
         InterleavedLedgerStorage storage = new InterleavedLedgerStorage();
-        storage.initialize(conf, manager, dirs, dirs, checkpointSource, NullStatsLogger.INSTANCE);
+        storage.initialize(conf, managerProv, dirs, dirs, checkpointSource, NullStatsLogger.INSTANCE);
 
         double threshold = 0.1;
         // shouldn't throw exception

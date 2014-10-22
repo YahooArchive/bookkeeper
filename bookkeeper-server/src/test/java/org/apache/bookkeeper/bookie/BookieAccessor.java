@@ -25,10 +25,15 @@ import java.util.concurrent.Future;
 
 import org.apache.bookkeeper.bookie.CheckpointSource.Checkpoint;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Accessor class to avoid making Bookie internals public
  */
 public class BookieAccessor {
+    private static final Logger LOG = LoggerFactory.getLogger(BookieAccessor.class);
+
     /**
      * Force a bookie to flush its ledger storage
      */
@@ -39,7 +44,9 @@ public class BookieAccessor {
     }
 
     public static Future<?> triggerGC(Bookie b) {
-        return ((InterleavedLedgerStorage)b.ledgerStorage).gcThread.triggerGC();
+        InterleavedLedgerStorage storage = ((InterleavedLedgerStorage)b.ledgerStorage);
+        storage.gcThread.enableForceGC();
+        return storage.gcThread.triggerGC();
     }
 
     public static boolean ledgerExists(Bookie b, long ledgerId) throws IOException {

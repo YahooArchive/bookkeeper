@@ -47,11 +47,13 @@ public class SortedLedgerStorage extends InterleavedLedgerStorage
     }
 
     @Override
-    public void initialize(ServerConfiguration conf, LedgerManager ledgerManager,
+    public void initialize(ServerConfiguration conf,
+                           GarbageCollectorThread.LedgerManagerProvider ledgerManagerProv,
                            LedgerDirsManager ledgerDirsManager, LedgerDirsManager indexDirsManager,
                            CheckpointSource checkpointSource, StatsLogger statsLogger)
             throws IOException {
-        super.initialize(conf, ledgerManager, ledgerDirsManager, indexDirsManager, null, statsLogger);
+        super.initialize(conf, ledgerManagerProv, ledgerDirsManager,
+                         indexDirsManager, null, statsLogger);
         this.memTable = new EntryMemTable(conf, checkpointSource, statsLogger);
         this.scheduler = Executors.newSingleThreadScheduledExecutor(
                 new ThreadFactoryBuilder()
