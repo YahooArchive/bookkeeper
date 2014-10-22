@@ -20,9 +20,9 @@
  */
 package org.apache.bookkeeper.bookie;
 
+import java.io.IOException;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -89,11 +89,7 @@ public class EntryLogTest {
         EntryLogMetadata meta = new EntryLogMetadata(0L);
         ExtractionScanner scanner = new ExtractionScanner(meta);
 
-        try {
-            logger.scanEntryLog(0L, scanner);
-            fail("Should not reach here!");
-        } catch (IOException ie) {
-        }
+        logger.scanEntryLog(0L, scanner);
 
         LOG.info("Extracted Meta From Entry Log {}", meta);
         assertNotNull(meta.ledgersMap.get(1L));
