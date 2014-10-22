@@ -36,7 +36,6 @@ import java.util.NavigableMap;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.jmx.BKMBeanInfo;
-import org.apache.bookkeeper.meta.LedgerManager;
 import org.apache.bookkeeper.proto.BookieProtocol;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
@@ -102,7 +101,8 @@ public class InterleavedLedgerStorage implements CompactableLedgerStorage, Entry
     }
 
     @Override
-    public void initialize(ServerConfiguration conf, LedgerManager ledgerManager,
+    public void initialize(ServerConfiguration conf,
+                           GarbageCollectorThread.LedgerManagerProvider ledgerManagerProvider,
                            LedgerDirsManager ledgerDirsManager, LedgerDirsManager indexDirsManager,
                            CheckpointSource checkpointSource, StatsLogger statsLogger)
             throws IOException {
@@ -111,7 +111,7 @@ public class InterleavedLedgerStorage implements CompactableLedgerStorage, Entry
         entryLogger = new EntryLogger(conf, ledgerDirsManager, this);
         ledgerCache = new LedgerCacheImpl(conf, activeLedgers,
                 null == indexDirsManager ? ledgerDirsManager : indexDirsManager, statsLogger);
-        gcThread = new GarbageCollectorThread(conf, ledgerManager, this);
+        gcThread = new GarbageCollectorThread(conf, ledgerManagerProvider, this);
         ledgerDirsManager.addLedgerDirsListener(getLedgerDirsListener());
         // Expose Stats
         getOffsetStats = statsLogger.getOpStatsLogger(STORAGE_GET_OFFSET);
