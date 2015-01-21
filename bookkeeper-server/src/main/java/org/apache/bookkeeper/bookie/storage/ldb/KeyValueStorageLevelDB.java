@@ -144,6 +144,22 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
         };
     }
 
+    @Override
+    public long count() throws IOException {
+        long count = 0;
+
+        CloseableIterator<byte[]> iter = keys();
+        try {
+            while (iter.hasNext()) {
+                ++count;
+            }
+        } finally {
+            iter.close();
+        }
+
+        return count;
+    }
+
     private final static Comparator<byte[]> ByteComparator = UnsignedBytes.lexicographicalComparator();
 
     @Override
@@ -154,8 +170,7 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
         return new CloseableIterator<byte[]>() {
             @Override
             public boolean hasNext() {
-                return iterator.hasNext()
-                    && ByteComparator.compare(iterator.peekNext().getKey(), lastKey) < 0;
+                return iterator.hasNext() && ByteComparator.compare(iterator.peekNext().getKey(), lastKey) < 0;
             }
 
             @Override

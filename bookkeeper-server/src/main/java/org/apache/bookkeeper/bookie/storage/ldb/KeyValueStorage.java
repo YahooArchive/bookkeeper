@@ -76,8 +76,14 @@ public interface KeyValueStorage extends Closeable {
      */
     CloseableIterator<Entry<byte[], byte[]>> iterator();
 
+    /**
+     * @return the number of keys
+     */
+    long count() throws IOException;
+
     interface CloseableIterator<T> extends Closeable {
         public boolean hasNext() throws IOException;
+
         public T next() throws IOException;
     }
 }

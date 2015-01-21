@@ -90,9 +90,8 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
     @Override
     public void initialize(ServerConfiguration conf,
-                           GarbageCollectorThread.LedgerManagerProvider ledgerManagerProvider,
-                           LedgerDirsManager ledgerDirsManager, StatsLogger stats)
-            throws IOException {
+            GarbageCollectorThread.LedgerManagerProvider ledgerManagerProvider, LedgerDirsManager ledgerDirsManager,
+            StatsLogger stats) throws IOException {
         checkArgument(ledgerDirsManager.getAllLedgerDirs().size() == 1,
                 "Db implementation only allows for one storage dir");
 
@@ -119,38 +118,74 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     public void registerStats() {
         stats.registerGauge("writeCacheSize", new Gauge<Long>() {
             @Override
-            public Long getDefaultValue() { return 0L; }
+            public Long getDefaultValue() {
+                return 0L;
+            }
 
             @Override
-            public Long getSample() { return writeCache.size() + writeCacheBeingFlushed.size(); }
+            public Long getSample() {
+                return writeCache.size() + writeCacheBeingFlushed.size();
+            }
         });
         stats.registerGauge("writeCacheCount", new Gauge<Long>() {
             @Override
-            public Long getDefaultValue() { return 0L; }
+            public Long getDefaultValue() {
+                return 0L;
+            }
 
             @Override
-            public Long getSample() { return writeCache.count() + writeCacheBeingFlushed.count(); }
+            public Long getSample() {
+                return writeCache.count() + writeCacheBeingFlushed.count();
+            }
         });
         stats.registerGauge("readCacheSize", new Gauge<Long>() {
             @Override
-            public Long getDefaultValue() { return 0L; }
+            public Long getDefaultValue() {
+                return 0L;
+            }
 
             @Override
-            public Long getSample() { return readAheadCache.size(); }
+            public Long getSample() {
+                return readAheadCache.size();
+            }
         });
         stats.registerGauge("readCacheCount", new Gauge<Long>() {
             @Override
-            public Long getDefaultValue() { return 0L; }
+            public Long getDefaultValue() {
+                return 0L;
+            }
 
             @Override
-            public Long getSample() { return readAheadCache.count(); }
+            public Long getSample() {
+                return readAheadCache.count();
+            }
         });
         stats.registerGauge("trimSize", new Gauge<Long>() {
             @Override
-            public Long getDefaultValue() { return 0L; }
+            public Long getDefaultValue() {
+                return 0L;
+            }
 
             @Override
-            public Long getSample() { return writeCacheSizeTrimmed.get(); }
+            public Long getSample() {
+                return writeCacheSizeTrimmed.get();
+            }
+        });
+
+        stats.registerGauge("ledgersCount", new Gauge<Long>() {
+            @Override
+            public Long getDefaultValue() {
+                return 0L;
+            }
+
+            @Override
+            public Long getSample() {
+                try {
+                    return ledgerIndex.count();
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
         });
 
         trimOpStats = stats.getOpStatsLogger("trim-op");
@@ -453,7 +488,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
             long deletedSize = writeCache.trimLedger(ledgerId, lastEntryId);
             writeCacheSizeTrimmed.addAndGet(deletedSize);
             trimOpStats.registerSuccessfulEvent(MathUtils.elapsedNanos(startTime));
-        } catch(Exception e) {
+        } catch (Exception e) {
             trimOpStats.registerFailedEvent(MathUtils.elapsedNanos(startTime));
         } finally {
             writeCacheMutex.readLock().unlock();

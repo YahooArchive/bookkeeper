@@ -41,7 +41,7 @@ public class LedgerMetadataIndex implements Closeable {
     private StatsLogger stats;
     private final ConcurrentHashMap<Long, ReentrantLock> dbWriteLocks = new ConcurrentHashMap<Long, ReentrantLock>();
     private final static int DB_LOCK_BUCKETS = 16;
-    
+
     public LedgerMetadataIndex(String basePath, StatsLogger stats) throws IOException {
         String ledgersPath = FileSystems.getDefault().getPath(basePath, "ledgers").toFile().toString();
         ledgersDb = new KeyValueStorageLevelDB(ledgersPath);
@@ -64,10 +64,10 @@ public class LedgerMetadataIndex implements Closeable {
                     }
                 });
 
-        for(long i = 0; i < DB_LOCK_BUCKETS; i++) {
+        for (long i = 0; i < DB_LOCK_BUCKETS; i++) {
             dbWriteLocks.put(i, new ReentrantLock());
         }
-        
+
         this.stats = stats;
         registerStats();
     }
@@ -75,24 +75,36 @@ public class LedgerMetadataIndex implements Closeable {
     public void registerStats() {
         stats.registerGauge("ledgersCacheSize", new Gauge<Long>() {
             @Override
-            public Long getDefaultValue() { return 0L; }
+            public Long getDefaultValue() {
+                return 0L;
+            }
 
             @Override
-            public Long getSample() { return ledgersCache.size(); }
+            public Long getSample() {
+                return ledgersCache.size();
+            }
         });
         stats.registerGauge("ledgersCacheCount", new Gauge<Long>() {
             @Override
-            public Long getDefaultValue() { return 0L; }
+            public Long getDefaultValue() {
+                return 0L;
+            }
 
             @Override
-            public Long getSample() { return ledgersCache.stats().loadCount(); }
+            public Long getSample() {
+                return ledgersCache.stats().loadCount();
+            }
         });
         stats.registerGauge("ledgersCacheHitRate", new Gauge<Double>() {
             @Override
-            public Double getDefaultValue() { return 0.0D; }
+            public Double getDefaultValue() {
+                return 0.0D;
+            }
 
             @Override
-            public Double getSample() { return ledgersCache.stats().hitRate(); }
+            public Double getSample() {
+                return ledgersCache.stats().hitRate();
+            }
         });
     }
 
@@ -100,6 +112,10 @@ public class LedgerMetadataIndex implements Closeable {
     public void close() throws IOException {
         ledgersCache.invalidateAll();
         ledgersDb.close();
+    }
+
+    public long count() throws IOException {
+        return ledgersDb.count();
     }
 
     public LedgerData get(long ledgerId) throws IOException {
@@ -134,8 +150,7 @@ public class LedgerMetadataIndex implements Closeable {
         }
     }
 
-    public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId)
-            throws IOException {
+    public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId) throws IOException {
         List<Long> ledgerIds = Lists.newArrayList();
         CloseableIterator<byte[]> iter = ledgersDb.keys(toArray(firstLedgerId), toArray(lastLedgerId));
         try {
@@ -173,7 +188,7 @@ public class LedgerMetadataIndex implements Closeable {
         } finally {
             dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).unlock();
         }
-        
+
         return true;
     }
 
