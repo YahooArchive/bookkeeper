@@ -518,7 +518,7 @@ public class LedgerHandle {
         }
 
         try {
-            bk.mainWorkerPool.submitOrdered(ledgerId, new SafeRunnable() {
+            bk.mainWorkerPool.submit(new SafeRunnable() {
                 @Override
                 public void safeRun() {
                     ChannelBuffer toSend = macManager.computeDigestAndPackageForSending(
