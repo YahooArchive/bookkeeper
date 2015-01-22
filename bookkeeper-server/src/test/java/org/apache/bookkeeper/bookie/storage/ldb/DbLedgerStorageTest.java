@@ -10,22 +10,27 @@ import java.nio.ByteBuffer;
 import java.util.List;
 
 import org.apache.bookkeeper.bookie.Bookie;
+import org.apache.bookkeeper.bookie.Bookie.EntryTrimmedException;
 import org.apache.bookkeeper.bookie.Bookie.NoEntryException;
 import org.apache.bookkeeper.bookie.BookieException;
 import org.apache.bookkeeper.bookie.EntryLogger;
-import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.proto.BookieProtocol;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 import com.google.common.collect.Lists;
 
 public class DbLedgerStorageTest {
 
-    @Test
-    public void simple() throws Exception {
-        File tmpDir = File.createTempFile("bkTest", ".dir");
+    private DbLedgerStorage storage;
+    private File tmpDir;
+
+    @Before
+    public void setup() throws Exception {
+        tmpDir = File.createTempFile("bkTest", ".dir");
         tmpDir.delete();
         tmpDir.mkdir();
         File curDir = Bookie.getCurrentDirectory(tmpDir);
@@ -39,9 +44,16 @@ public class DbLedgerStorageTest {
         conf.setLedgerDirNames(new String[] { tmpDir.toString() });
         Bookie bookie = new Bookie(conf);
 
-        CompactableLedgerStorage storage = (CompactableLedgerStorage) bookie.getLedgerStorage();
-        assertTrue(storage instanceof DbLedgerStorage);
+        storage = (DbLedgerStorage) bookie.getLedgerStorage();
+    }
 
+    @After
+    public void teardown() throws Exception {
+        tmpDir.delete();
+    }
+
+    @Test
+    public void simple() throws Exception {
         assertEquals(false, storage.ledgerExists(3));
         try {
             storage.isFenced(3);
@@ -64,7 +76,7 @@ public class DbLedgerStorageTest {
             assertTrue(ioe.getCause() instanceof BookieException.BookieIllegalOpException);
         }
         // setting the same key is NOOP
-        storage.setMasterKey(3,  "key".getBytes());
+        storage.setMasterKey(3, "key".getBytes());
         assertEquals(true, storage.ledgerExists(3));
         assertEquals(true, storage.setFenced(3));
         assertEquals(true, storage.isFenced(3));
@@ -187,23 +199,6 @@ public class DbLedgerStorageTest {
 
     @Test
     public void testBookieCompaction() throws Exception {
-        File tmpDir = File.createTempFile("bkTest", ".dir");
-        tmpDir.delete();
-        tmpDir.mkdir();
-        File curDir = Bookie.getCurrentDirectory(tmpDir);
-        Bookie.checkDirectoryStructure(curDir);
-
-        int gcWaitTime = 1000;
-        ServerConfiguration conf = new ServerConfiguration();
-        conf.setGcWaitTime(gcWaitTime);
-        conf.setAllowLoopback(true);
-        conf.setLedgerStorageClass(DbLedgerStorage.class.getName());
-        conf.setLedgerDirNames(new String[] { tmpDir.toString() });
-        Bookie bookie = new Bookie(conf);
-
-        CompactableLedgerStorage storage = (CompactableLedgerStorage) bookie.getLedgerStorage();
-        assertTrue(storage instanceof DbLedgerStorage);
-
         storage.setMasterKey(4, "key".getBytes());
 
         ByteBuffer entry3 = ByteBuffer.allocate(1024);
@@ -234,12 +229,6 @@ public class DbLedgerStorageTest {
 
     @Test
     public void doubleDirectoryError() throws Exception {
-        File tmpDir = File.createTempFile("bkTest", ".dir");
-        tmpDir.delete();
-        tmpDir.mkdir();
-        File curDir = Bookie.getCurrentDirectory(tmpDir);
-        Bookie.checkDirectoryStructure(curDir);
-
         int gcWaitTime = 1000;
         ServerConfiguration conf = new ServerConfiguration();
         conf.setGcWaitTime(gcWaitTime);
@@ -258,23 +247,6 @@ public class DbLedgerStorageTest {
 
     @Test
     public void testRewritingEntries() throws Exception {
-        File tmpDir = File.createTempFile("bkTest", ".dir");
-        tmpDir.delete();
-        tmpDir.mkdir();
-        File curDir = Bookie.getCurrentDirectory(tmpDir);
-        Bookie.checkDirectoryStructure(curDir);
-
-        int gcWaitTime = 1000;
-        ServerConfiguration conf = new ServerConfiguration();
-        conf.setGcWaitTime(gcWaitTime);
-        conf.setAllowLoopback(true);
-        conf.setLedgerStorageClass(DbLedgerStorage.class.getName());
-        conf.setLedgerDirNames(new String[] { tmpDir.toString() });
-        Bookie bookie = new Bookie(conf);
-
-        CompactableLedgerStorage storage = (CompactableLedgerStorage) bookie.getLedgerStorage();
-        assertTrue(storage instanceof DbLedgerStorage);
-
         storage.setMasterKey(1, "key".getBytes());
 
         try {
@@ -303,6 +275,94 @@ public class DbLedgerStorageTest {
         storage.flush();
 
         ByteBuffer response = storage.getEntry(1, 1);
-        assertEquals(entry1, response);
+        assertEquals(newEntry1, response);
     }
+
+    @Test
+    public void testEntriesOutOfOrder() throws Exception {
+        storage.setMasterKey(1, "key".getBytes());
+
+        ByteBuffer entry2 = ByteBuffer.allocate(1024);
+        entry2.putLong(1); // ledger id
+        entry2.putLong(2); // entry id
+        entry2.put("entry-2".getBytes());
+        entry2.flip();
+
+        storage.addEntry(entry2);
+
+        try {
+            storage.getEntry(1, 1);
+            fail("Entry doesn't exist");
+        } catch (EntryTrimmedException e) {
+            // Ok, entry doesn't exist
+        }
+
+        assertEquals(entry2, storage.getEntry(1, 2));
+
+        ByteBuffer entry1 = ByteBuffer.allocate(1024);
+        entry1.putLong(1); // ledger id
+        entry1.putLong(1); // entry id
+        entry1.put("entry-1".getBytes());
+        entry1.flip();
+
+        storage.addEntry(entry1);
+
+        assertEquals(entry1, storage.getEntry(1, 1));
+        assertEquals(entry2, storage.getEntry(1, 2));
+
+        storage.flush();
+
+        assertEquals(entry1, storage.getEntry(1, 1));
+        assertEquals(entry2, storage.getEntry(1, 2));
+    }
+    
+    @Test
+    public void testEntriesOutOfOrderWithFlush() throws Exception {
+        storage.setMasterKey(1, "key".getBytes());
+
+        ByteBuffer entry2 = ByteBuffer.allocate(1024);
+        entry2.putLong(1); // ledger id
+        entry2.putLong(2); // entry id
+        entry2.put("entry-2".getBytes());
+        entry2.flip();
+
+        storage.addEntry(entry2);
+
+        try {
+            storage.getEntry(1, 1);
+            fail("Entry doesn't exist");
+        } catch (EntryTrimmedException e) {
+            // Ok, entry doesn't exist
+        }
+
+        assertEquals(entry2, storage.getEntry(1, 2));
+        
+        storage.flush();
+        
+        try {
+            storage.getEntry(1, 1);
+            fail("Entry doesn't exist");
+        } catch (EntryTrimmedException e) {
+            // Ok, entry doesn't exist
+        }
+
+        assertEquals(entry2, storage.getEntry(1, 2));
+
+        ByteBuffer entry1 = ByteBuffer.allocate(1024);
+        entry1.putLong(1); // ledger id
+        entry1.putLong(1); // entry id
+        entry1.put("entry-1".getBytes());
+        entry1.flip();
+
+        storage.addEntry(entry1);
+
+        assertEquals(entry1, storage.getEntry(1, 1));
+        assertEquals(entry2, storage.getEntry(1, 2));
+
+        storage.flush();
+
+        assertEquals(entry1, storage.getEntry(1, 1));
+        assertEquals(entry2, storage.getEntry(1, 2));
+    }
+
 }

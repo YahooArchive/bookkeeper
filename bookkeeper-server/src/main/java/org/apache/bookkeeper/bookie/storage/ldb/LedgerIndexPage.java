@@ -83,6 +83,10 @@ public class LedgerIndexPage implements Entry<byte[], byte[]> {
         locationsTable.putLong(offset, position);
     }
 
+    public boolean includes(long entryId) {
+        return entryId >= firstEntry && entryId <= lastEntry;
+    }
+
     public long getLedgerId() {
         return ledgerId;
     }

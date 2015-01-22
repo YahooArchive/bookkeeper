@@ -8,6 +8,7 @@ import java.util.Map.Entry;
 import java.util.Set;
 
 import org.apache.bookkeeper.bookie.Bookie;
+import org.apache.bookkeeper.bookie.Bookie.NoEntryException;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
 import org.apache.bookkeeper.bookie.storage.ldb.SortedLruCache.Weighter;
@@ -16,9 +17,7 @@ import org.apache.bookkeeper.stats.StatsLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Predicate;
 import com.google.common.collect.ComparisonChain;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
@@ -93,17 +92,25 @@ public class EntryLocationIndex implements Closeable {
     public void registerStats() {
         stats.registerGauge("locationsCacheSize", new Gauge<Long>() {
             @Override
-            public Long getDefaultValue() { return 0L; }
+            public Long getDefaultValue() {
+                return 0L;
+            }
 
             @Override
-            public Long getSample() { return locationsCache.getSize(); }
+            public Long getSample() {
+                return locationsCache.getSize();
+            }
         });
         stats.registerGauge("locationsCacheCount", new Gauge<Long>() {
             @Override
-            public Long getDefaultValue() { return 0L; }
+            public Long getDefaultValue() {
+                return 0L;
+            }
 
             @Override
-            public Long getSample() { return locationsCache.getNumberOfEntries(); }
+            public Long getSample() {
+                return locationsCache.getNumberOfEntries();
+            }
         });
     }
 
@@ -174,19 +181,42 @@ public class EntryLocationIndex implements Closeable {
             final long lastEntryId = getLastEntryInLedger(ledgerId);
 
             List<LongPair> entries = (List<LongPair>) locationMap.get(ledgerId);
-            if (entries.get(0).first <= lastEntryId) {
-                // The entries are overlapping another ledger index page in the db,
-                // we need to skip inserting the entries since we already have them
-                entries = Lists.newArrayList(Iterables.filter(entries, new Predicate<LongPair>() {
-                    public boolean apply(LongPair item) {
-                        return item.first > lastEntryId;
-                    }
-                }));
+            LedgerIndexPage olderIndexPage = null;
 
-                if (entries.isEmpty()) {
-                    // All the entries for this ledger were filtered out
-                    continue;
+            // First check entries that arrived out of order
+            int entriesOutOfOrder = 0;
+            for (LongPair entry : entries) {
+                long entryId = entry.first;
+                if (entryId > lastEntryId) {
+                    // No more entries out of order
+                    break;
                 }
+
+                ++entriesOutOfOrder;
+
+                if (olderIndexPage == null || !olderIndexPage.includes(entryId)) {
+                    // Find the correct ledger index page to update
+                    try {
+                        olderIndexPage = getLedgerIndexPage(ledgerId, entryId);
+                    } catch (NoEntryException e) {
+                        // If we cannot find the index page, we need to create a new one
+                        olderIndexPage = new LedgerIndexPage(ledgerId, Lists.newArrayList(entry));
+                    }
+                    
+                    batch.add(olderIndexPage);
+                }
+
+                olderIndexPage.setPosition(entryId, entry.second);
+            }
+
+            if (entriesOutOfOrder > 0) {
+                // Remove the entries out of order, since they were already inserted here above
+                entries = entries.subList(entriesOutOfOrder, entries.size());
+            }
+
+            if (entries.isEmpty()) {
+                // All the entries for this ledger were filtered out
+                continue;
             }
 
             LedgerIndexPage indexPage = new LedgerIndexPage(ledgerId, entries);
