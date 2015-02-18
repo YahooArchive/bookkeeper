@@ -24,18 +24,29 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Formatter;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
+
 import java.util.List;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.Collections;
 import java.util.Collection;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.bookkeeper.replication.AuditorElector;
 import org.apache.bookkeeper.bookie.BookieException.InvalidCookieException;
+
+import java.util.SortedMap;
+
+import org.apache.zookeeper.ZooKeeper;
+import org.apache.bookkeeper.meta.LedgerManagerFactory;
+import org.apache.bookkeeper.meta.LedgerUnderreplicationManager;
+import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
+
 import org.apache.bookkeeper.bookie.EntryLogger.EntryLogScanner;
 import org.apache.bookkeeper.bookie.Journal.JournalScanner;
+import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorage;
+
 import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.BookKeeperAdmin;
 import org.apache.bookkeeper.client.BookKeeper;
@@ -47,8 +58,7 @@ import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.meta.LedgerManager;
 import org.apache.bookkeeper.meta.LedgerManager.LedgerRangeIterator;
 import org.apache.bookkeeper.meta.LedgerManager.LedgerRange;
-import org.apache.bookkeeper.meta.LedgerManagerFactory;
-import org.apache.bookkeeper.meta.LedgerUnderreplicationManager;
+import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.util.EntryFormatter;
 import org.apache.bookkeeper.util.MathUtils;
@@ -57,7 +67,6 @@ import org.apache.bookkeeper.util.ZkUtils;
 import org.apache.bookkeeper.versioning.Version;
 import org.apache.bookkeeper.versioning.Versioned;
 import org.apache.bookkeeper.zookeeper.ZooKeeperClient;
-import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
 
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 
@@ -75,9 +84,10 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.lang.StringUtils;
 import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.ZooKeeper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.Maps;
 
 /**
  * Bookie Shell is to provide utilities for users to administer a bookkeeper cluster.
@@ -104,6 +114,7 @@ public class BookieShell implements Tool {
     static final String CMD_LISTBOOKIES = "listbookies";
     static final String CMD_UPDATECOOKIE = "updatecookie";
     static final String CMD_UPDATELEDGER = "updateledgers";
+    static final String CMD_UPGRADE_DB_STORAGE= "upgrade-db-storage";
     static final String CMD_HELP = "help";
 
     final ServerConfiguration bkConf = new ServerConfiguration();
@@ -1285,7 +1296,6 @@ public class BookieShell implements Tool {
             }
             return 0;
         }
-
     }
 
     /**
@@ -1293,6 +1303,80 @@ public class BookieShell implements Tool {
      */
     public interface UpdateLedgerNotifier {
         void progress(long updated, long issued);
+    }
+
+
+    /**
+     * Upgrade bookie indexes from InterleavedStorage to DbLedgerStorage format
+     */
+    class UpgradeDbStorageCmd extends MyCommand {
+        Options opts = new Options();
+
+        public UpgradeDbStorageCmd() {
+            super(CMD_UPGRADE_DB_STORAGE);
+        }
+
+        @Override
+        Options getOptions() {
+            return opts;
+        }
+
+        @Override
+        String getDescription() {
+            return "Upgrade bookie indexes from InterleavedStorage to DbLedgerStorage format";
+        }
+        
+        String getUsage() {
+            return "upgrade-db-storage";
+        }
+
+        @Override
+        int runCmd(CommandLine cmdLine) throws Exception {
+            LOG.info("=== Upgrading to DbLedgerStorage ===");
+            ServerConfiguration conf = new ServerConfiguration(bkConf);
+            LedgerDirsManager ledgerDirsManager = new LedgerDirsManager(bkConf,
+                    bkConf.getLedgerDirs());
+
+            InterleavedLedgerStorage interleavedStorage = new InterleavedLedgerStorage();
+            DbLedgerStorage dbStorage = new DbLedgerStorage();
+
+            CheckpointSource checkpointSource = new CheckpointSource() {
+                    @Override
+                    public Checkpoint newCheckpoint() {
+                        return Checkpoint.MAX;
+                    }
+
+                    @Override
+                    public void checkpointComplete(Checkpoint checkpoint, boolean compact)
+                            throws IOException {
+                    }
+                };
+
+            interleavedStorage.initialize(conf, null, ledgerDirsManager, ledgerDirsManager,
+                    checkpointSource, NullStatsLogger.INSTANCE);
+            dbStorage.initialize(conf, null, ledgerDirsManager, ledgerDirsManager,
+                    checkpointSource, NullStatsLogger.INSTANCE);
+
+            for (long ledgerId : interleavedStorage.getActiveLedgersInRange(0, Long.MAX_VALUE)) {
+                LOG.info("Converting ledger {}", ledgerId);
+
+                FileInfo fi = getFileInfo(ledgerId);
+
+                Iterable<SortedMap<Long, Long>> entries = getLedgerIndexEntries(ledgerId);
+
+                long numberOfEntries = dbStorage.addLedgerToIndex(ledgerId, fi.isFenced(), fi.getMasterKey(), entries);
+                LOG.info("   -- done. fenced={} entries={}", fi.isFenced(), numberOfEntries);
+
+                // Remove index from old storage
+                interleavedStorage.deleteLedger(ledgerId);
+            }
+
+            dbStorage.shutdown();
+            interleavedStorage.shutdown();
+
+            LOG.info("---- Done Converting ----");
+            return 0;
+        }
     }
 
     final Map<String, MyCommand> commands = new HashMap<String, MyCommand>();
@@ -1313,6 +1397,7 @@ public class BookieShell implements Tool {
         commands.put(CMD_LISTBOOKIES, new ListBookiesCmd());
         commands.put(CMD_UPDATECOOKIE, new UpdateCookieCmd());
         commands.put(CMD_UPDATELEDGER, new UpdateLedgerCmd());
+        commands.put(CMD_UPGRADE_DB_STORAGE, new UpgradeDbStorageCmd());
         commands.put(CMD_HELP, new HelpCmd());
     }
 
@@ -1547,6 +1632,66 @@ public class BookieShell implements Tool {
                                  + ", the index file may be corrupted or last index page is not fully flushed yet : " + ie.getMessage());
             }
         }
+    }
+
+    /**
+     * Get an iterable over pages of entries and locations for a ledger
+     *
+     * @param ledgerId
+     * @return
+     * @throws IOException
+     */
+    protected Iterable<SortedMap<Long, Long>> getLedgerIndexEntries(final long ledgerId) throws IOException {
+        final FileInfo fi = getFileInfo(ledgerId);
+        final long size = fi.size();
+
+        final LedgerEntryPage lep = new LedgerEntryPage(pageSize, entriesPerPage);
+        lep.usePage();
+
+        final Iterator<SortedMap<Long, Long>> iterator = new Iterator<SortedMap<Long, Long>>() {
+            long curSize = 0;
+            long curEntry = 0;
+
+            @Override
+            public boolean hasNext() {
+                return curSize < size;
+            }
+
+            @Override
+            public SortedMap<Long, Long> next() {
+                SortedMap<Long, Long> entries = Maps.newTreeMap();
+                lep.setLedgerAndFirstEntry(ledgerId, curEntry);
+                try {
+                    lep.readPage(fi);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+
+                // process a page
+                for (int i = 0; i < entriesPerPage; i++) {
+                    long offset = lep.getOffset(i * 8);
+                    if (offset != 0) {
+                        entries.put(curEntry, offset);
+                    }
+                    ++curEntry;
+                }
+
+                curSize += pageSize;
+                return entries;
+            }
+
+            @Override
+            public void remove() {
+                throw new RuntimeException("Cannot remove");
+            }
+
+        };
+
+        return new Iterable<SortedMap<Long, Long>>() {
+            public Iterator<SortedMap<Long, Long>> iterator() {
+                return iterator;
+            }
+        };
     }
 
     /**
