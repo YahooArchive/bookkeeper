@@ -20,18 +20,20 @@
  */
 package org.apache.bookkeeper.proto;
 
+import java.nio.channels.ClosedChannelException;
+
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.processor.RequestProcessor;
+import org.jboss.netty.channel.AdaptiveReceiveBufferSizePredictorFactory;
 import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.channel.ChannelStateEvent;
 import org.jboss.netty.channel.ExceptionEvent;
 import org.jboss.netty.channel.MessageEvent;
 import org.jboss.netty.channel.SimpleChannelHandler;
 import org.jboss.netty.channel.group.ChannelGroup;
+import org.jboss.netty.channel.socket.nio.NioSocketChannelConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.nio.channels.ClosedChannelException;
 
 /**
  * Serverside handler for bookkeeper requests
@@ -51,6 +53,9 @@ class BookieRequestHandler extends SimpleChannelHandler {
     public void channelOpen(ChannelHandlerContext ctx,
                             ChannelStateEvent e)
             throws Exception {
+        NioSocketChannelConfig config = (NioSocketChannelConfig) ctx.getChannel().getConfig();
+        config.setReceiveBufferSizePredictorFactory(new AdaptiveReceiveBufferSizePredictorFactory(64 * 1024,
+                8 * 1024 * 1024, 12 * 1024 * 1024));
         allChannels.add(ctx.getChannel());
     }
 
