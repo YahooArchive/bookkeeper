@@ -1,9 +1,7 @@
 
 yroot: cloud_messaging_bookkeeper
 yroot_remove: false
-
-yroot_x86_64_rhel_image: 6.3-20120918
-
+yroot_x86_64_rhel_image: 6.5-20140110
 provision_yinst_version: stable
 
 dist_key_file: /home/tortuga/.ssh/id_dsa
