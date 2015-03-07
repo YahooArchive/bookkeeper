@@ -32,8 +32,7 @@ import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -72,6 +71,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.Lists;
 
 import static org.apache.bookkeeper.bookie.BookKeeperServerStats.LD_LEDGER_SCOPE;
@@ -116,7 +117,7 @@ public class Bookie extends BookieCriticalThread {
     BookieBean jmxBookieBean;
     BKMBeanInfo jmxLedgerStorageBean;
 
-    final ConcurrentMap<Long, byte[]> masterKeyCache = new ConcurrentHashMap<Long, byte[]>();
+    final Cache<Long, byte[]> masterKeyCache = CacheBuilder.newBuilder().expireAfterAccess(1, TimeUnit.DAYS).build();
 
     final protected Registrar registrar;
 
@@ -575,7 +576,7 @@ public class Bookie extends BookieCriticalThread {
                         }
                     } else if (entryId == METAENTRY_ID_FENCE_KEY) {
                         if (journalVersion >= JournalChannel.V4) {
-                            byte[] key = masterKeyCache.get(ledgerId);
+                            byte[] key = masterKeyCache.getIfPresent(ledgerId);
                             if (key == null) {
                                 key = ledgerStorage.readMasterKey(ledgerId);
                             }
@@ -587,7 +588,7 @@ public class Bookie extends BookieCriticalThread {
                                     + ") is too old to hold this");
                         }
                     } else {
-                        byte[] key = masterKeyCache.get(ledgerId);
+                        byte[] key = masterKeyCache.getIfPresent(ledgerId);
                         if (key == null) {
                             key = ledgerStorage.readMasterKey(ledgerId);
                         }
@@ -951,23 +952,31 @@ public class Bookie extends BookieCriticalThread {
      *
      * @throws BookieException if masterKey does not match the master key of the ledger
      */
-    private LedgerDescriptor getLedgerForEntry(ByteBuffer entry, byte[] masterKey)
+    private LedgerDescriptor getLedgerForEntry(ByteBuffer entry, final byte[] masterKey)
             throws IOException, BookieException {
-        long ledgerId = entry.getLong();
+        final long ledgerId = entry.getLong();
         LedgerDescriptor l = handles.getHandle(ledgerId, masterKey);
-        if (!masterKeyCache.containsKey(ledgerId)) {
-            // new handle, we should add the key to journal ensure we can rebuild
-            ByteBuffer bb = ByteBuffer.allocate(8 + 8 + 4 + masterKey.length);
-            bb.putLong(ledgerId);
-            bb.putLong(METAENTRY_ID_LEDGER_KEY);
-            bb.putInt(masterKey.length);
-            bb.put(masterKey);
-            bb.flip();
+        try {
+            // Force the load into masterKey cache
+            masterKeyCache.get(ledgerId, new Callable<byte[]>() {
+                @Override
+                public byte[] call() throws Exception {
+                 // new handle, we should add the key to journal ensure we can rebuild
+                    ByteBuffer bb = ByteBuffer.allocate(8 + 8 + 4 + masterKey.length);
+                    bb.putLong(ledgerId);
+                    bb.putLong(METAENTRY_ID_LEDGER_KEY);
+                    bb.putInt(masterKey.length);
+                    bb.put(masterKey);
+                    bb.flip();
 
-            if (null == masterKeyCache.putIfAbsent(ledgerId, masterKey)) {
-                getJournal(ledgerId).logAddEntry(bb, new NopWriteCallback(), null);
-            }
+                    getJournal(ledgerId).logAddEntry(bb, new NopWriteCallback(), null);
+                    return masterKey;
+                }
+            });
+        } catch (ExecutionException e) {
+            throw new IOException(e.getCause());
         }
+
         return l;
     }
 
