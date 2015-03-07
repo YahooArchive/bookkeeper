@@ -22,47 +22,61 @@
 package org.apache.bookkeeper.bookie;
 
 import java.io.IOException;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 
 class HandleFactoryImpl implements HandleFactory {
-    ConcurrentMap<Long, LedgerDescriptor> ledgers = new ConcurrentHashMap<Long, LedgerDescriptor>();
-    ConcurrentMap<Long, LedgerDescriptor> readOnlyLedgers
-        = new ConcurrentHashMap<Long, LedgerDescriptor>();
+    private final Cache<Long, LedgerDescriptor> ledgers;
+    private final Cache<Long, LedgerDescriptor> readOnlyLedgers;
 
     final LedgerStorage ledgerStorage;
 
     HandleFactoryImpl(LedgerStorage ledgerStorage) {
         this.ledgerStorage = ledgerStorage;
+        this.ledgers = CacheBuilder.newBuilder().expireAfterAccess(1, TimeUnit.DAYS).build();
+        this.readOnlyLedgers = CacheBuilder.newBuilder().expireAfterAccess(1, TimeUnit.DAYS).build();
     }
 
     @Override
-    public LedgerDescriptor getHandle(long ledgerId, byte[] masterKey)
-            throws IOException, BookieException {
-        LedgerDescriptor handle = null;
-        if (null == (handle = ledgers.get(ledgerId))) {
-            // LedgerDescriptor#create sets the master key in the ledger storage, calling it
-            // twice on the same ledgerId is safe because it eventually puts a value in the ledger cache
-            // that guarantees synchronized access across all cached entries.
-            handle = ledgers.putIfAbsent(ledgerId, LedgerDescriptor.create(masterKey, ledgerId, ledgerStorage));
-            if (null == handle) {
-                handle = ledgers.get(ledgerId);
+    public LedgerDescriptor getHandle(final long ledgerId, final byte[] masterKey) throws IOException, BookieException {
+        try {
+            LedgerDescriptor handle = ledgers.get(ledgerId, new Callable<LedgerDescriptor>() {
+                @Override
+                public LedgerDescriptor call() throws Exception {
+                    return LedgerDescriptor.create(masterKey, ledgerId, ledgerStorage);
+                }
+            });
+
+            handle.checkAccess(masterKey);
+            return handle;
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof IOException) {
+                throw (IOException) e.getCause();
+            } else {
+                throw new IOException(e.getCause());
             }
         }
-        handle.checkAccess(masterKey);
-        return handle;
     }
 
     @Override
-    public LedgerDescriptor getReadOnlyHandle(long ledgerId)
-            throws IOException, Bookie.NoLedgerException {
-        LedgerDescriptor handle = null;
-        if (null == (handle = readOnlyLedgers.get(ledgerId))) {
-            handle = readOnlyLedgers.putIfAbsent(ledgerId, LedgerDescriptor.createReadOnly(ledgerId, ledgerStorage));
-            if (null == handle) {
-                handle = readOnlyLedgers.get(ledgerId);
+    public LedgerDescriptor getReadOnlyHandle(final long ledgerId) throws IOException, Bookie.NoLedgerException {
+        try {
+            return readOnlyLedgers.get(ledgerId, new Callable<LedgerDescriptor>() {
+                @Override
+                public LedgerDescriptor call() throws Exception {
+                    return LedgerDescriptor.createReadOnly(ledgerId, ledgerStorage);
+                }
+            });
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof IOException) {
+                throw (IOException) e.getCause();
+            } else {
+                throw new IOException(e.getCause());
             }
         }
-        return handle;
     }
 }
