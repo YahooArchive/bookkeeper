@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.apache.bk_v4_0_0.zookeeper.KeeperException.NodeExistsException;
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.Bookie.EntryTrimmedException;
 import org.apache.bookkeeper.bookie.Bookie.NoEntryException;
@@ -177,12 +178,12 @@ public class DbLedgerStorageTest {
         // Get last entry from storage
         storage.flush();
 
-        res = storage.getEntry(4, BookieProtocol.LAST_ADD_CONFIRMED);
-        assertEquals(entry2, res);
-
-        // Get last entry from cache
-        res = storage.getEntry(4, BookieProtocol.LAST_ADD_CONFIRMED);
-        assertEquals(entry2, res);
+        try {
+            storage.getEntry(4, BookieProtocol.LAST_ADD_CONFIRMED);
+            fail("should have failed");
+        } catch (NoEntryException e) {
+            // Ok, ledger 4 was already deleted
+        }
 
         storage.setMasterKey(4, "key".getBytes());
 
