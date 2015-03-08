@@ -6,12 +6,13 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.FileSystems;
+import java.util.AbstractMap.SimpleEntry;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.BookieException;
@@ -22,10 +23,10 @@ import org.apache.bookkeeper.stats.StatsLogger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
+import com.google.common.base.Predicate;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.google.protobuf.ByteString;
 
 /**
@@ -34,46 +35,49 @@ import com.google.protobuf.ByteString;
  * The key is the ledgerId and the value is the {@link LedgerData} content.
  */
 public class LedgerMetadataIndex implements Closeable {
-    // Cache of ledger data, used to avoid deserializing from db entries many times
-    private final LoadingCache<Long, LedgerData> ledgersCache;
+    // Contains all ledgers stored in the bookie
+    private final ConcurrentMap<Long, LedgerData> ledgers;
+    private final AtomicInteger ledgersCount;
 
     private final KeyValueStorage ledgersDb;
     private StatsLogger stats;
-    private final ConcurrentHashMap<Long, ReentrantLock> dbWriteLocks = new ConcurrentHashMap<Long, ReentrantLock>();
-    private final static int DB_LOCK_BUCKETS = 16;
+
+    // Holds ledger modifications applied in memory map, and pending to be flushed on db
+    private final ConcurrentLinkedQueue<Entry<Long, LedgerData>> pendingLedgersUpdates;
+
+    // Holds ledger ids that were delete from memory map, and pending to be flushed on db
+    private final ConcurrentLinkedQueue<Long> pendingDeletedLedgers;
 
     public LedgerMetadataIndex(String basePath, StatsLogger stats) throws IOException {
         String ledgersPath = FileSystems.getDefault().getPath(basePath, "ledgers").toFile().toString();
         ledgersDb = new KeyValueStorageLevelDB(ledgersPath);
 
-        ledgersCache = CacheBuilder.newBuilder().expireAfterAccess(1, TimeUnit.MINUTES)
-                .build(new CacheLoader<Long, LedgerData>() {
-                    @Override
-                    public LedgerData load(Long ledgerId) throws Exception {
-                        log.debug("Loading ledger data from db. ledger {}", ledgerId);
-                        byte[] ledgerKey = toArray(ledgerId);
-                        byte[] result = ledgersDb.get(ledgerKey);
-                        if (result != null) {
-                            log.debug("Found in db. ledger {}", ledgerId);
-                            return LedgerData.parseFrom(result);
-                        } else {
-                            // No ledger was found on the db, throws an exception
-                            log.debug("Not Found in db. ledger {}", ledgerId);
-                            throw new Bookie.NoLedgerException(ledgerId);
-                        }
-                    }
-                });
+        ledgers = Maps.newConcurrentMap();
+        ledgersCount = new AtomicInteger();
 
-        for (long i = 0; i < DB_LOCK_BUCKETS; i++) {
-            dbWriteLocks.put(i, new ReentrantLock());
+        // Read all ledgers from db
+        CloseableIterator<Entry<byte[], byte[]>> iterator = ledgersDb.iterator();
+        try {
+            while (iterator.hasNext()) {
+                Entry<byte[], byte[]> entry = iterator.next();
+                long ledgerId = fromArray(entry.getKey());
+                LedgerData ledgerData = LedgerData.parseFrom(entry.getValue());
+                ledgers.put(ledgerId, ledgerData);
+                ledgersCount.incrementAndGet();
+            }
+        } finally {
+            iterator.close();
         }
+
+        this.pendingLedgersUpdates = new ConcurrentLinkedQueue<Entry<Long, LedgerData>>();
+        this.pendingDeletedLedgers = new ConcurrentLinkedQueue<Long>();
 
         this.stats = stats;
         registerStats();
     }
 
     public void registerStats() {
-        stats.registerGauge("ledgers-cache-size", new Gauge<Long>() {
+        stats.registerGauge("ledgers-count", new Gauge<Long>() {
             @Override
             public Long getDefaultValue() {
                 return 0L;
@@ -81,87 +85,53 @@ public class LedgerMetadataIndex implements Closeable {
 
             @Override
             public Long getSample() {
-                return ledgersCache.size();
-            }
-        });
-        stats.registerGauge("ledgers-cache-count", new Gauge<Long>() {
-            @Override
-            public Long getDefaultValue() {
-                return 0L;
-            }
-
-            @Override
-            public Long getSample() {
-                return ledgersCache.stats().loadCount();
-            }
-        });
-        stats.registerGauge("ledgers-cache-hit-rate", new Gauge<Double>() {
-            @Override
-            public Double getDefaultValue() {
-                return 0.0D;
-            }
-
-            @Override
-            public Double getSample() {
-                return ledgersCache.stats().hitRate() * 100;
+                return (long) ledgersCount.get();
             }
         });
     }
 
     @Override
     public void close() throws IOException {
-        ledgersCache.invalidateAll();
         ledgersDb.close();
     }
 
-    public long count() throws IOException {
-        return ledgersDb.count();
-    }
-
     public LedgerData get(long ledgerId) throws IOException {
-        try {
-            return ledgersCache.get(ledgerId);
-        } catch (ExecutionException e) {
-            if (e.getCause() instanceof Bookie.NoLedgerException) {
-                throw (Bookie.NoLedgerException) (e.getCause());
-            }
-            throw new IOException(e.getCause());
+        LedgerData ledgerData = ledgers.get(ledgerId);
+        if (ledgerData == null) {
+            log.debug("Ledger not found {}", ledgerId);
+            throw new Bookie.NoLedgerException(ledgerId);
         }
+
+        return ledgerData;
     }
 
     public void set(long ledgerId, LedgerData ledgerData) throws IOException {
         ledgerData = LedgerData.newBuilder(ledgerData).setExists(true).build();
-        dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).lock();
-        try {
-            ledgersDb.put(toArray(ledgerId), ledgerData.toByteArray());
-            ledgersCache.invalidate(ledgerId);
-        } finally {
-            dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).unlock();
+
+        if (ledgers.put(ledgerId, ledgerData) == null) {
+            log.debug("Added new ledger {}", ledgerId);
+            ledgersCount.incrementAndGet();
         }
+
+        pendingLedgersUpdates.add(new SimpleEntry<Long, LedgerData>(ledgerId, ledgerData));
     }
 
     public void delete(long ledgerId) throws IOException {
-        dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).lock();
-        try {
-            ledgersDb.delete(toArray(ledgerId));
-            ledgersCache.invalidate(ledgerId);
-        } finally {
-            dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).unlock();
+        if (ledgers.remove(ledgerId) != null) {
+            log.debug("Removed ledger {}", ledgerId);
+            ledgersCount.decrementAndGet();
         }
+
+        pendingDeletedLedgers.add(ledgerId);
     }
 
-    public Iterable<Long> getActiveLedgersInRange(long firstLedgerId, long lastLedgerId) throws IOException {
-        List<Long> ledgerIds = Lists.newArrayList();
-        CloseableIterator<byte[]> iter = ledgersDb.keys(toArray(firstLedgerId), toArray(lastLedgerId));
-        try {
-            while (iter.hasNext()) {
-                ledgerIds.add(fromArray(iter.next()));
+    public Iterable<Long> getActiveLedgersInRange(final long firstLedgerId, final long lastLedgerId) throws IOException {
+        return Iterables.filter(ledgers.keySet(), new Predicate<Long>() {
+            @Override
+            public boolean apply(Long ledgerId) {
+                return ledgerId >= firstLedgerId && ledgerId < lastLedgerId;
             }
-        } finally {
-            iter.close();
-        }
-
-        return ledgerIds;
+        });
     }
 
     static long fromArray(byte[] array) {
@@ -173,51 +143,72 @@ public class LedgerMetadataIndex implements Closeable {
         return ByteBuffer.allocate(8).putLong(n).array();
     }
 
-    private static final Logger log = LoggerFactory.getLogger(LedgerMetadataIndex.class);
-
-    public boolean setFenced(final long ledgerId) throws IOException {
-        dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).lock();
-        try {
-            LedgerData curData = get(ledgerId);
-            if (curData.getFenced()) {
-                return false;
-            }
-            curData = LedgerData.newBuilder(curData).setFenced(true).build();
-            ledgersDb.put(toArray(ledgerId), curData.toByteArray());
-            ledgersCache.invalidate(ledgerId);
-        } finally {
-            dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).unlock();
+    public boolean setFenced(long ledgerId) throws IOException {
+        LedgerData ledgerData = get(ledgerId);
+        if (ledgerData.getFenced()) {
+            return false;
         }
 
+        LedgerData newLedgerData = LedgerData.newBuilder(ledgerData).setFenced(true).build();
+
+        if (ledgers.put(ledgerId, newLedgerData) == null) {
+            // Ledger had been deleted
+            log.debug("Re-inserted fenced ledger {}", ledgerId);
+            ledgersCount.incrementAndGet();
+        } else {
+            log.debug("Set fenced ledger {}", ledgerId);
+        }
+
+        pendingLedgersUpdates.add(new SimpleEntry<Long, LedgerData>(ledgerId, newLedgerData));
         return true;
     }
 
-    public void setMasterKey(final long ledgerId, final byte[] masterKey) throws IOException {
-        dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).lock();
-        try {
-            try {
-                LedgerData curData = ledgersCache.get(ledgerId);
-                if (!Arrays.equals(curData.getMasterKey().toByteArray(), masterKey)) {
-                    log.debug("Ledger {} masterKey in db can only be set once.", ledgerId);
-                    throw BookieException.create(BookieException.Code.IllegalOpException);
-                }
-            } catch (ExecutionException ee) {
-                if (ee.getCause() instanceof Bookie.NoLedgerException) {
-                    // need to insert new entry in ledgersDb
-                    LedgerData newData = LedgerData.newBuilder().setExists(true).setFenced(false)
-                            .setMasterKey(ByteString.copyFrom(masterKey)).build();
-                    ledgersDb.put(toArray(ledgerId), newData.toByteArray());
-                    return;
-                }
-                log.error("Set masterKey failed for Ledger {} with error: {}", ledgerId, ee.getCause().getMessage());
-                throw new IOException(ee.getCause());
-            } catch (Exception e) {
-                log.error("Set masterKey failed for ledger {} with error: {}", ledgerId, e.getMessage());
-                throw new IOException(e);
+    public void setMasterKey(long ledgerId, byte[] masterKey) throws IOException {
+        LedgerData ledgerData = ledgers.get(ledgerId);
+        if (ledgerData == null) {
+            // New ledger inserted
+            ledgerData = LedgerData.newBuilder().setExists(true).setFenced(false)
+                    .setMasterKey(ByteString.copyFrom(masterKey)).build();
+            log.debug("Inserting new ledger {}", ledgerId);
+        } else {
+            if (!Arrays.equals(ledgerData.getMasterKey().toByteArray(), masterKey)) {
+                log.warn("Ledger {} masterKey in db can only be set once.", ledgerId);
+                throw new IOException(BookieException.create(BookieException.Code.IllegalOpException));
             }
-        } finally {
-            dbWriteLocks.get(ledgerId % DB_LOCK_BUCKETS).unlock();
         }
+
+        if (ledgers.put(ledgerId, ledgerData) == null) {
+            ledgersCount.incrementAndGet();
+        }
+
+        pendingLedgersUpdates.add(new SimpleEntry<Long, LedgerData>(ledgerId, ledgerData));
     }
 
+    /**
+     * Flushes all pending changes
+     */
+    public void flush() throws IOException {
+        List<Entry<byte[], byte[]>> updates = Lists.newArrayList();
+
+        while (!pendingLedgersUpdates.isEmpty()) {
+            Entry<Long, LedgerData> entry = pendingLedgersUpdates.poll();
+            byte[] key = toArray(entry.getKey());
+            byte[] value = entry.getValue().toByteArray();
+            updates.add(new SimpleEntry<byte[], byte[]>(key, value));
+        }
+
+        log.debug("Persisting updates to {} ledgers", updates.size());
+        ledgersDb.put(updates);
+
+        List<byte[]> deletes = Lists.newArrayList();
+        while (!pendingDeletedLedgers.isEmpty()) {
+            long ledgerId = pendingDeletedLedgers.poll();
+            deletes.add(toArray(ledgerId));
+        }
+
+        log.debug("Persisting deletes of ledgers", deletes.size());
+        ledgersDb.delete(deletes);
+    }
+
+    private static final Logger log = LoggerFactory.getLogger(LedgerMetadataIndex.class);
 }
