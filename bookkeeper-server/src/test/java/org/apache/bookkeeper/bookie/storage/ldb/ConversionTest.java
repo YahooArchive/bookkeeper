@@ -3,20 +3,21 @@ package org.apache.bookkeeper.bookie.storage.ldb;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.List;
+import java.util.Set;
 
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.Bookie.NoLedgerException;
 import org.apache.bookkeeper.bookie.BookieShell;
+import org.apache.bookkeeper.bookie.CheckpointSource;
 import org.apache.bookkeeper.bookie.InterleavedLedgerStorage;
 import org.apache.bookkeeper.bookie.LedgerDirsManager;
-import org.apache.bookkeeper.bookie.CheckpointSource;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.junit.Assert;
 import org.junit.Test;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 
 public class ConversionTest {
 
@@ -85,11 +86,11 @@ public class ConversionTest {
         interleavedStorage.initialize(conf, null, ledgerDirsManager, ledgerDirsManager,
                                       checkpointSource, NullStatsLogger.INSTANCE);
 
-        List<Long> ledgers = Lists.newArrayList(dbStorage.getActiveLedgersInRange(0, Long.MAX_VALUE));
-        Assert.assertEquals(Lists.newArrayList(0l, 1l, 2l, 3l, 4l), ledgers);
+        Set<Long> ledgers = Sets.newTreeSet(dbStorage.getActiveLedgersInRange(0, Long.MAX_VALUE));
+        Assert.assertEquals(Sets.newTreeSet(Lists.newArrayList(0l, 1l, 2l, 3l, 4l)), ledgers);
 
-        ledgers = Lists.newArrayList(interleavedStorage.getActiveLedgersInRange(0, Long.MAX_VALUE));
-        Assert.assertEquals(Lists.newArrayList(), ledgers);
+        ledgers = Sets.newTreeSet(interleavedStorage.getActiveLedgersInRange(0, Long.MAX_VALUE));
+        Assert.assertEquals(Sets.newTreeSet(), ledgers);
 
         for (long ledgerId = 0; ledgerId < 5; ledgerId++) {
             Assert.assertEquals(true, dbStorage.isFenced(ledgerId));
