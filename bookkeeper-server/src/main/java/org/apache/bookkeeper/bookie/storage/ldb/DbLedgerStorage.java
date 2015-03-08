@@ -109,9 +109,8 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
     @Override
     public void initialize(ServerConfiguration conf,
-                           GarbageCollectorThread.LedgerManagerProvider ledgerManagerProvider,
-                           LedgerDirsManager ledgerDirsManager, LedgerDirsManager indexDirsManager,
-                           CheckpointSource checkpointSource, StatsLogger statsLogger)
+            GarbageCollectorThread.LedgerManagerProvider ledgerManagerProvider, LedgerDirsManager ledgerDirsManager,
+            LedgerDirsManager indexDirsManager, CheckpointSource checkpointSource, StatsLogger statsLogger)
             throws IOException {
         checkArgument(ledgerDirsManager.getAllLedgerDirs().size() == 1,
                 "Db implementation only allows for one storage dir");
@@ -197,22 +196,6 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
             }
         });
 
-        stats.registerGauge("ledgers-count", new Gauge<Long>() {
-            @Override
-            public Long getDefaultValue() {
-                return 0L;
-            }
-
-            @Override
-            public Long getSample() {
-                try {
-                    return ledgerIndex.count();
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        });
-
         addEntryStats = stats.getOpStatsLogger("add-entry");
         readEntryStats = stats.getOpStatsLogger("read-entry");
         readCacheHitStats = stats.getOpStatsLogger("read-cache-hits");
@@ -232,6 +215,8 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     @Override
     public void shutdown() throws InterruptedException {
         try {
+            flush();
+
             gcThread.shutdown();
             entryLogger.shutdown();
 
@@ -534,6 +519,9 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         entryLogger.flush();
 
         entryLocationIndex.addLocations(locationMap);
+
+        ledgerIndex.flush();
+
         lastCheckpoint = thisCheckpoint;
 
         // Discard all the entry from the write cache, since they're now persisted
