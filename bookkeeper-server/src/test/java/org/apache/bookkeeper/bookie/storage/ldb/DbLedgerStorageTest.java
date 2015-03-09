@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
 
-import org.apache.bk_v4_0_0.zookeeper.KeeperException.NodeExistsException;
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.Bookie.EntryTrimmedException;
 import org.apache.bookkeeper.bookie.Bookie.NoEntryException;
@@ -100,11 +99,11 @@ public class DbLedgerStorageTest {
         entry.put("entry-1".getBytes());
         entry.flip();
 
-        assertEquals(false, ((DbLedgerStorage)storage).isFlushRequired());
+        assertEquals(false, ((DbLedgerStorage) storage).isFlushRequired());
 
         assertEquals(1, storage.addEntry(entry.duplicate()));
 
-        assertEquals(true, ((DbLedgerStorage)storage).isFlushRequired());
+        assertEquals(true, ((DbLedgerStorage) storage).isFlushRequired());
 
         // Read from write cache
         ByteBuffer res = storage.getEntry(4, 1);
@@ -112,7 +111,7 @@ public class DbLedgerStorageTest {
 
         storage.flush();
 
-        assertEquals(false, ((DbLedgerStorage)storage).isFlushRequired());
+        assertEquals(false, ((DbLedgerStorage) storage).isFlushRequired());
 
         // Read from db
         res = storage.getEntry(4, 1);
@@ -316,7 +315,7 @@ public class DbLedgerStorageTest {
         assertEquals(entry1, storage.getEntry(1, 1));
         assertEquals(entry2, storage.getEntry(1, 2));
     }
-    
+
     @Test
     public void testEntriesOutOfOrderWithFlush() throws Exception {
         storage.setMasterKey(1, "key".getBytes());
@@ -337,9 +336,9 @@ public class DbLedgerStorageTest {
         }
 
         assertEquals(entry2, storage.getEntry(1, 2));
-        
+
         storage.flush();
-        
+
         try {
             storage.getEntry(1, 1);
             fail("Entry doesn't exist");
