@@ -1,5 +1,7 @@
 package org.apache.bookkeeper.bookie.storage.ldb;
 
+import io.netty.util.internal.ConcurrentSet;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.FileSystems;
@@ -74,6 +76,8 @@ public class EntryLocationIndex implements Closeable {
 
     private final KeyValueStorage locationsDb;
     private final SortedLruCache<LongPair, LedgerIndexPage> locationsCache;
+    private final ConcurrentSet<Long> deletedLedgers = new ConcurrentSet<Long>();
+
     private StatsLogger stats;
 
     public EntryLocationIndex(String basePath, StatsLogger stats) throws IOException {
@@ -125,6 +129,11 @@ public class EntryLocationIndex implements Closeable {
     }
 
     LedgerIndexPage getLedgerIndexPage(long ledgerId, long entryId) throws IOException {
+        if (deletedLedgers.contains(ledgerId)) {
+            log.debug("Entry not found {}@{} - Ledger already deleted", ledgerId, entryId);
+            throw new Bookie.NoEntryException(ledgerId, entryId);
+        }
+
         LedgerIndexPage ledgerIndexPage = locationsCache.get(new LongPair(ledgerId, entryId));
         if (ledgerIndexPage != null) {
             log.debug("Found ledger index page for {}@{} in cache", ledgerId, entryId);
@@ -155,6 +164,11 @@ public class EntryLocationIndex implements Closeable {
     }
 
     public Long getLastEntryInLedger(long ledgerId) throws IOException {
+        if (deletedLedgers.contains(ledgerId)) {
+            // Ledger already deleted
+            return -1L;
+        }
+
         LongPair nextEntryKey = new LongPair(ledgerId + 1, 0);
 
         // Search the last entry in storage
@@ -276,30 +290,46 @@ public class EntryLocationIndex implements Closeable {
 
     public void delete(long ledgerId) throws IOException {
         // We need to find all the LedgerIndexPage records belonging to one specific ledgers
-
-        List<byte[]> keys = Lists.newArrayList();
+        deletedLedgers.add(ledgerId);
 
         LongPair firstKey = new LongPair(ledgerId, 0);
         LongPair lastKey = new LongPair(ledgerId + 1, 0);
         log.debug("Deleting from {} to {}", firstKey, lastKey);
 
-        CloseableIterator<byte[]> iter = locationsDb.keys(firstKey.toArray(), lastKey.toArray());
-        try {
-            while (iter.hasNext()) {
-                byte[] key = iter.next();
-                if (log.isDebugEnabled()) {
-                    log.debug("Deleting ledger index page ({}, {})", LongPair.fromArray(key).first,
-                            LongPair.fromArray(key).second);
-                }
+        locationsCache.removeRange(firstKey, lastKey);
+    }
 
-                keys.add(key);
+    public void flush() throws IOException {
+        List<byte[]> keys = Lists.newArrayList();
+
+        List<Long> deletedLedgersList = Lists.newArrayList(deletedLedgers);
+        for (Long ledgerId : deletedLedgersList) {
+            LongPair firstKey = new LongPair(ledgerId, 0);
+            LongPair lastKey = new LongPair(ledgerId + 1, 0);
+            log.debug("Deleting from {} to {}", firstKey, lastKey);
+
+            CloseableIterator<byte[]> iter = locationsDb.keys(firstKey.toArray(), lastKey.toArray());
+            try {
+                while (iter.hasNext()) {
+                    byte[] key = iter.next();
+                    if (log.isDebugEnabled()) {
+                        log.debug("Deleting ledger index page ({}, {})", LongPair.fromArray(key).first,
+                                LongPair.fromArray(key).second);
+                    }
+
+                    keys.add(key);
+                }
+            } finally {
+                iter.close();
             }
-        } finally {
-            iter.close();
         }
 
         locationsDb.delete(keys);
-        locationsCache.removeRange(firstKey, lastKey);
+
+        // Removed from pending set
+        for (Long ledgerId : deletedLedgersList) {
+            deletedLedgers.remove(ledgerId);
+        }
     }
 
     private static final Logger log = LoggerFactory.getLogger(EntryLocationIndex.class);

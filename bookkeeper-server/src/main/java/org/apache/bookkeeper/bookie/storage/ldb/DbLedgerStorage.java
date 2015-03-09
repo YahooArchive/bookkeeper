@@ -521,6 +521,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         entryLocationIndex.addLocations(locationMap);
 
         ledgerIndex.flush();
+        entryLocationIndex.flush();
 
         lastCheckpoint = thisCheckpoint;
 
