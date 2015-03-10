@@ -268,7 +268,7 @@ class Journal extends BookieCriticalThread implements CheckpointSource {
     /**
      * Journal Entry to Record
      */
-    private static class QueueEntry {
+    private class QueueEntry implements Runnable {
         ByteBuffer entry;
         long ledgerId;
         long entryId;
@@ -292,9 +292,14 @@ class Journal extends BookieCriticalThread implements CheckpointSource {
             }
             cb.writeComplete(0, ledgerId, entryId, null, ctx);
         }
+
+        @Override
+        public void run() {
+            callback();
+        }
     }
 
-    private class ForceWriteRequest implements Runnable {
+    private class ForceWriteRequest {
         private final JournalChannel logFile;
         private final LinkedList<QueueEntry> forceWriteWaiters;
         private boolean shouldClose;
@@ -330,21 +335,14 @@ class Journal extends BookieCriticalThread implements CheckpointSource {
                 lastLogMark.setCurLogMark(this.logId, this.lastFlushedPosition);
 
                 // Notify the waiters that the force write succeeded
-                cbThreadPool.submit(this);
+                for (QueueEntry e : this.forceWriteWaiters) {
+                    cbThreadPool.submit(e);
+                }
 
                 return this.forceWriteWaiters.size();
             }
             finally {
                 closeFileIfNecessary();
-            }
-        }
-
-        @Override
-        public void run() {
-            for (QueueEntry e : this.forceWriteWaiters) {
-                journalAddEntryStats.registerSuccessfulEvent(MathUtils.elapsedNanos(e.enqueueTime),
-                        TimeUnit.NANOSECONDS);
-                e.callback();    // Process cbs inline
             }
         }
 
