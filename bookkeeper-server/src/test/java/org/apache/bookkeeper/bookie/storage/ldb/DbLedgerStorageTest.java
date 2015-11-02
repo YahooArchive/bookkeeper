@@ -9,6 +9,8 @@ import io.netty.buffer.Unpooled;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
 import org.apache.bookkeeper.bookie.Bookie;
@@ -21,13 +23,27 @@ import org.apache.bookkeeper.proto.BookieProtocol;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 
 import com.google.common.collect.Lists;
 
+@RunWith(Parameterized.class)
 public class DbLedgerStorageTest {
 
     private DbLedgerStorage storage;
     private File tmpDir;
+    private final boolean rocksDBEnabled;
+    
+    @Parameters
+    public static Collection<Object[]> configs() {
+        return Arrays.asList(new Object[][] { { false }, { true } });
+    }
+    
+    public DbLedgerStorageTest(boolean rocksDBEnabled) {
+        this.rocksDBEnabled = rocksDBEnabled;
+    }
 
     @Before
     public void setup() throws Exception {
@@ -42,6 +58,7 @@ public class DbLedgerStorageTest {
         conf.setGcWaitTime(gcWaitTime);
         conf.setAllowLoopback(true);
         conf.setLedgerStorageClass(DbLedgerStorage.class.getName());
+        conf.setProperty(DbLedgerStorage.ROCKSDB_ENABLED, rocksDBEnabled);
         conf.setLedgerDirNames(new String[] { tmpDir.toString() });
         Bookie bookie = new Bookie(conf);
 

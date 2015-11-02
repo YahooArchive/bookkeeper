@@ -12,6 +12,7 @@ import java.util.Set;
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.Bookie.NoEntryException;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.Batch;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
 import org.apache.bookkeeper.bookie.storage.ldb.SortedLruCache.Weighter;
 import org.apache.bookkeeper.stats.Gauge;
@@ -86,9 +87,10 @@ public class EntryLocationIndex implements Closeable {
 
     private StatsLogger stats;
 
-    public EntryLocationIndex(String basePath, StatsLogger stats, long entryLocationCacheMaxSize) throws IOException {
+    public EntryLocationIndex(KeyValueStorageFactory storageFactory, String basePath, StatsLogger stats,
+            long entryLocationCacheMaxSize) throws IOException {
         String locationsDbPath = FileSystems.getDefault().getPath(basePath, "locations").toFile().toString();
-        locationsDb = new KeyValueStorageLevelDB(locationsDbPath);
+        locationsDb = storageFactory.newKeyValueStorage(locationsDbPath);
 
         // Convert max memory size to max number of entries
         long maxNumberOfEntries = entryLocationCacheMaxSize / LedgerIndexPage.SIZE_OF_LONG;
@@ -211,7 +213,7 @@ public class EntryLocationIndex implements Closeable {
     }
 
     public void addLocations(Multimap<Long, LongPair> locationMap) throws IOException {
-        List<Entry<byte[], byte[]>> batch = Lists.newArrayListWithExpectedSize(locationMap.keys().size());
+        Batch batch = locationsDb.newBatch();
 
         if (log.isDebugEnabled()) {
             log.debug("Add locations for {} ledgers", locationMap.keySet().size());
@@ -258,7 +260,7 @@ public class EntryLocationIndex implements Closeable {
                         olderIndexPage = new LedgerIndexPage(ledgerId, Lists.newArrayList(entry));
                     }
 
-                    batch.add(olderIndexPage);
+                    batch.put(olderIndexPage.getKey(), olderIndexPage.getValue());
                 }
 
                 olderIndexPage.setPosition(entryId, entry.second);
@@ -279,10 +281,10 @@ public class EntryLocationIndex implements Closeable {
             if (log.isDebugEnabled()) {
                 log.debug("Adding page to index: {}", indexPage);
             }
-            batch.add(indexPage);
+            batch.put(indexPage.getKey(), indexPage.getValue());
         }
 
-        locationsDb.put(batch);
+        batch.flush();
     }
 
     public synchronized void updateLocations(Iterable<EntryLocation> newLocations) throws IOException {
@@ -307,12 +309,12 @@ public class EntryLocationIndex implements Closeable {
         }
 
         // Store the pages back in the db
-        List<Entry<byte[], byte[]>> batch = Lists.newArrayListWithCapacity(pagesUpdated.size());
+        Batch batch = locationsDb.newBatch();
         for (LedgerIndexPage indexPage : pagesUpdated) {
-            batch.add(indexPage);
+            batch.put(indexPage.getKey(), indexPage.getValue());
         }
 
-        locationsDb.put(batch);
+        batch.flush();
     }
 
     public void delete(long ledgerId) throws IOException {
@@ -329,7 +331,7 @@ public class EntryLocationIndex implements Closeable {
     }
 
     public void flush() throws IOException {
-        List<byte[]> keys = Lists.newArrayList();
+        Batch batch = locationsDb.newBatch();
 
         List<Long> deletedLedgersList = Lists.newArrayList(deletedLedgers);
         for (Long ledgerId : deletedLedgersList) {
@@ -348,14 +350,14 @@ public class EntryLocationIndex implements Closeable {
                                 LongPair.fromArray(key).second);
                     }
 
-                    keys.add(key);
+                    batch.remove(key);
                 }
             } finally {
                 iter.close();
             }
         }
 
-        locationsDb.delete(keys);
+        batch.flush();
 
         // Removed from pending set
         for (Long ledgerId : deletedLedgersList) {

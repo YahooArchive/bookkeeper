@@ -5,16 +5,29 @@ import org.apache.bookkeeper.client.BookKeeper.DigestType;
 import org.apache.bookkeeper.client.LedgerHandle;
 import org.apache.bookkeeper.test.BookKeeperClusterTestCase;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 
 import static org.junit.Assert.*;
 
+import java.util.Arrays;
+import java.util.Collection;
+
+@RunWith(Parameterized.class)
 public class DbLedgerStorageBookieTest extends BookKeeperClusterTestCase {
 
-    public DbLedgerStorageBookieTest() {
+    @Parameters
+    public static Collection<Object[]> configs() {
+        return Arrays.asList(new Object[][] { { false }, { true } });
+    }
+
+    public DbLedgerStorageBookieTest(boolean rocksDBEnabled) {
         super(1);
         baseConf.setLedgerStorageClass(DbLedgerStorage.class.getName());
         baseConf.setProperty(DbLedgerStorage.TRIM_ENABLED, true);
         baseConf.setFlushInterval(60000);
+        baseConf.setProperty(DbLedgerStorage.ROCKSDB_ENABLED, rocksDBEnabled);
     }
 
     // @Test

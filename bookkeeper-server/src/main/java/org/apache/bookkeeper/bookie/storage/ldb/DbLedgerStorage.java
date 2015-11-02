@@ -75,6 +75,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     static final String READ_AHEAD_CACHE_MAX_SIZE_MB = "dbStorage_readAheadCacheMaxSizeMb";
     static final String ENTRY_LOCATION_CACHE_MAX_SIZE_MB = "dbStorage_entryLocationCacheMaxSizeMb";
     static final String TRIM_ENABLED = "dbStorage_trimEnabled";
+    static final String ROCKSDB_ENABLED = "dbStorage_rocksDBEnabled";
 
     private static final long DEFAULT_WRITE_CACHE_MAX_SIZE_MB = 16;
     private static final long DEFAULT_READ_CACHE_MAX_SIZE_MB = 16;
@@ -129,6 +130,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
         trimEnabled = conf.getBoolean(TRIM_ENABLED, false);
         this.stats = statsLogger;
+        boolean rocksDBEnabled = conf.getBoolean(ROCKSDB_ENABLED, false);
 
         log.info("Started Db Ledger Storage");
         log.info(" - Write cache size: {} MB", writeCacheMaxSize / MB);
@@ -136,9 +138,13 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         log.info(" - Read Cache: {} MB", readCacheMaxSize / MB);
         log.info(" - Read Cache threshold: {} MB", maxReadCacheSizeBelowThreshold / MB);
         log.info(" - Entry location cache max size: {} MB", entryLocationCacheMaxSize / MB);
+        log.info(" - RocksDB enabled: {}", rocksDBEnabled);
 
-        ledgerIndex = new LedgerMetadataIndex(baseDir, stats);
-        entryLocationIndex = new EntryLocationIndex(baseDir, stats, entryLocationCacheMaxSize);
+        KeyValueStorageFactory storageFactory = rocksDBEnabled ? //
+                KeyValueStorageRocksDB.factory //
+                : KeyValueStorageLevelDB.factory;
+        ledgerIndex = new LedgerMetadataIndex(storageFactory, baseDir, stats);
+        entryLocationIndex = new EntryLocationIndex(storageFactory, baseDir, stats, entryLocationCacheMaxSize);
 
         entryLogger = new EntryLogger(conf, ledgerDirsManager);
         gcThread = new GarbageCollectorThread(conf, ledgerManagerProvider, this);
