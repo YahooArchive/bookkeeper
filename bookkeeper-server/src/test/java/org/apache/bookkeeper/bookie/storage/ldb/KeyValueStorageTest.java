@@ -1,28 +1,47 @@
 package org.apache.bookkeeper.bookie.storage.ldb;
 
 import static junit.framework.Assert.assertEquals;
+import static junit.framework.Assert.assertTrue;
 import static org.apache.bookkeeper.bookie.storage.ldb.LedgerMetadataIndex.fromArray;
 import static org.apache.bookkeeper.bookie.storage.ldb.LedgerMetadataIndex.toArray;
 
 import java.io.File;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map.Entry;
 
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage;
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.Batch;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageLevelDB;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 
 import com.google.common.collect.Lists;
 
-public class KeyValueStorageLevelDbTest {
+@RunWith(Parameterized.class)
+public class KeyValueStorageTest {
 
+    private final KeyValueStorageFactory storageFactory;
+    
+    @Parameters
+    public static Collection<Object[]> configs() {
+        return Arrays.asList(new Object[][] { {KeyValueStorageLevelDB.factory }, {KeyValueStorageRocksDB.factory}});
+    }
+    
+    public KeyValueStorageTest(KeyValueStorageFactory storageFactory) {
+        this.storageFactory = storageFactory;
+    }
+    
     @Test
     public void simple() throws Exception {
         File tmpDir = File.createTempFile("bookie", "test");
         tmpDir.delete();
 
-        KeyValueStorage db = new KeyValueStorageLevelDB(tmpDir.getAbsolutePath());
+        KeyValueStorage db = storageFactory.newKeyValueStorage(tmpDir.getAbsolutePath());
 
         assertEquals(null, db.getFloor(toArray(3)));
         assertEquals(0, db.count());
@@ -43,7 +62,8 @@ public class KeyValueStorageLevelDbTest {
         // //
 
         db.put(toArray(5), toArray(5));
-        assertEquals(2, db.count());
+        // Count can be imprecise
+        assertTrue(db.count() > 0);
 
         assertEquals(null, db.getFloor(toArray(1)));
         assertEquals(null, db.getFloor(toArray(3)));
@@ -96,20 +116,23 @@ public class KeyValueStorageLevelDbTest {
         db.put(toArray(12), toArray(12));
         db.put(toArray(14), toArray(14));
 
-        assertEquals(6, db.count());
+        // Count can be imprecise
+        assertTrue(db.count() > 0);
 
         assertEquals(10l, fromArray(db.get(toArray(10))));
         db.delete(toArray(10));
         assertEquals(null, db.get(toArray(10)));
-        assertEquals(5, db.count());
+        assertTrue(db.count() > 0);
 
-        db.delete(Lists.newArrayList(toArray(11), toArray(12), toArray(13)));
+        Batch batch = db.newBatch();
+        batch.remove(toArray(11));
+        batch.remove(toArray(12));
+        batch.remove(toArray(13));
+        batch.flush();
         assertEquals(null, db.get(toArray(11)));
         assertEquals(null, db.get(toArray(12)));
         assertEquals(null, db.get(toArray(13)));
         assertEquals(14l, fromArray(db.get(toArray(14))));
-
-        assertEquals(3, db.count());
 
         db.close();
         tmpDir.delete();

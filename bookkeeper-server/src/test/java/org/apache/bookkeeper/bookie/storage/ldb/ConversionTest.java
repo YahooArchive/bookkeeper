@@ -5,7 +5,8 @@ import io.netty.buffer.Unpooled;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Set;
 
 import org.apache.bookkeeper.bookie.Bookie;
@@ -18,23 +19,37 @@ import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.junit.Assert;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameters;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
+@RunWith(Parameterized.class)
 public class ConversionTest {
 
-    CheckpointSource checkpointSource = new CheckpointSource() {
-            @Override
-            public Checkpoint newCheckpoint() {
-                return Checkpoint.MAX;
-            }
+    private final boolean rocksDBEnabled;
 
-            @Override
-            public void checkpointComplete(Checkpoint checkpoint, boolean compact)
-                    throws IOException {
-            }
-        };
+    @Parameters
+    public static Collection<Object[]> configs() {
+        return Arrays.asList(new Object[][] { { false }, { true } });
+    }
+
+    public ConversionTest(boolean rocksDBEnabled) {
+        this.rocksDBEnabled = rocksDBEnabled;
+    }
+
+    CheckpointSource checkpointSource = new CheckpointSource() {
+        @Override
+        public Checkpoint newCheckpoint() {
+            return Checkpoint.MAX;
+        }
+
+        @Override
+        public void checkpointComplete(Checkpoint checkpoint, boolean compact) throws IOException {
+        }
+    };
 
     @Test
     public void test() throws Exception {
@@ -48,11 +63,12 @@ public class ConversionTest {
 
         ServerConfiguration conf = new ServerConfiguration();
         conf.setLedgerDirNames(new String[] { tmpDir.toString() });
+        conf.setProperty(DbLedgerStorage.ROCKSDB_ENABLED, rocksDBEnabled);
         LedgerDirsManager ledgerDirsManager = new LedgerDirsManager(conf, conf.getLedgerDirs());
 
         InterleavedLedgerStorage interleavedStorage = new InterleavedLedgerStorage();
-        interleavedStorage.initialize(conf, null, ledgerDirsManager, ledgerDirsManager,
-                                      checkpointSource, NullStatsLogger.INSTANCE);
+        interleavedStorage.initialize(conf, null, ledgerDirsManager, ledgerDirsManager, checkpointSource,
+                NullStatsLogger.INSTANCE);
 
         // Insert some ledger & entries in the interleaved storage
         for (long ledgerId = 0; ledgerId < 5; ledgerId++) {
@@ -81,12 +97,12 @@ public class ConversionTest {
 
         // Verify that db index has the same entries
         DbLedgerStorage dbStorage = new DbLedgerStorage();
-        dbStorage.initialize(conf, null, ledgerDirsManager, ledgerDirsManager,
-                             checkpointSource, NullStatsLogger.INSTANCE);
+        dbStorage.initialize(conf, null, ledgerDirsManager, ledgerDirsManager, checkpointSource,
+                NullStatsLogger.INSTANCE);
 
         interleavedStorage = new InterleavedLedgerStorage();
-        interleavedStorage.initialize(conf, null, ledgerDirsManager, ledgerDirsManager,
-                                      checkpointSource, NullStatsLogger.INSTANCE);
+        interleavedStorage.initialize(conf, null, ledgerDirsManager, ledgerDirsManager, checkpointSource,
+                NullStatsLogger.INSTANCE);
 
         Set<Long> ledgers = Sets.newTreeSet(dbStorage.getActiveLedgersInRange(0, Long.MAX_VALUE));
         Assert.assertEquals(Sets.newTreeSet(Lists.newArrayList(0l, 1l, 2l, 3l, 4l)), ledgers);

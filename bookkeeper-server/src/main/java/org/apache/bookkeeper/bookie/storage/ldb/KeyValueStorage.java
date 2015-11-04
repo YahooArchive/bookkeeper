@@ -8,8 +8,6 @@ public interface KeyValueStorage extends Closeable {
 
     void put(byte[] key, byte[] value) throws IOException;
 
-    void put(Iterable<Entry<byte[], byte[]>> entries) throws IOException;
-
     /**
      * Get the value associated with the given key
      * 
@@ -51,8 +49,6 @@ public interface KeyValueStorage extends Closeable {
      */
     void delete(byte[] key) throws IOException;
 
-    void delete(Iterable<byte[]> keys) throws IOException;
-
     /**
      * Get an iterator over to scan sequentially through all the keys in the database
      * 
@@ -88,4 +84,14 @@ public interface KeyValueStorage extends Closeable {
     }
 
     void forceCompaction() throws IOException;
+
+    Batch newBatch();
+
+    public static interface Batch {
+        void put(byte[] key, byte[] value);
+
+        void remove(byte[] key);
+
+        void flush() throws IOException;
+    }
 }

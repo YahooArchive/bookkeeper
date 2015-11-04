@@ -8,7 +8,6 @@ import java.nio.ByteBuffer;
 import java.nio.file.FileSystems;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -16,6 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.BookieException;
 import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorageDataFormats.LedgerData;
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.Batch;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
 import org.apache.bookkeeper.stats.Gauge;
 import org.apache.bookkeeper.stats.StatsLogger;
@@ -26,7 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.protobuf.ByteString;
 
 /**
@@ -48,9 +47,10 @@ public class LedgerMetadataIndex implements Closeable {
     // Holds ledger ids that were delete from memory map, and pending to be flushed on db
     private final ConcurrentLinkedQueue<Long> pendingDeletedLedgers;
 
-    public LedgerMetadataIndex(String basePath, StatsLogger stats) throws IOException {
+    public LedgerMetadataIndex(KeyValueStorageFactory storageFactory, String basePath, StatsLogger stats)
+            throws IOException {
         String ledgersPath = FileSystems.getDefault().getPath(basePath, "ledgers").toFile().toString();
-        ledgersDb = new KeyValueStorageLevelDB(ledgersPath);
+        ledgersDb = storageFactory.newKeyValueStorage(ledgersPath);
 
         ledgers = new ConcurrentLongHashMap<>();
         ledgersCount = new AtomicInteger();
@@ -131,7 +131,8 @@ public class LedgerMetadataIndex implements Closeable {
         pendingDeletedLedgers.add(ledgerId);
     }
 
-    public Iterable<Long> getActiveLedgersInRange(final long firstLedgerId, final long lastLedgerId) throws IOException {
+    public Iterable<Long> getActiveLedgersInRange(final long firstLedgerId, final long lastLedgerId)
+            throws IOException {
         return Iterables.filter(ledgers.keys(), new Predicate<Long>() {
             @Override
             public boolean apply(Long ledgerId) {
@@ -207,30 +208,32 @@ public class LedgerMetadataIndex implements Closeable {
      * Flushes all pending changes
      */
     public void flush() throws IOException {
-        List<Entry<byte[], byte[]>> updates = Lists.newArrayList();
+        Batch batch = ledgersDb.newBatch();
 
+        int updatedLedgers = 0;
         while (!pendingLedgersUpdates.isEmpty()) {
             Entry<Long, LedgerData> entry = pendingLedgersUpdates.poll();
             byte[] key = toArray(entry.getKey());
             byte[] value = entry.getValue().toByteArray();
-            updates.add(new SimpleEntry<byte[], byte[]>(key, value));
+            batch.put(key, value);
+            ++updatedLedgers;
         }
 
         if (log.isDebugEnabled()) {
-            log.debug("Persisting updates to {} ledgers", updates.size());
+            log.debug("Persisting updates to {} ledgers", updatedLedgers);
         }
-        ledgersDb.put(updates);
 
-        List<byte[]> deletes = Lists.newArrayList();
+        int deletedLedgers = 0;
         while (!pendingDeletedLedgers.isEmpty()) {
             long ledgerId = pendingDeletedLedgers.poll();
-            deletes.add(toArray(ledgerId));
+            batch.remove(toArray(ledgerId));
         }
 
         if (log.isDebugEnabled()) {
-            log.debug("Persisting deletes of ledgers", deletes.size());
+            log.debug("Persisting deletes of ledgers", deletedLedgers);
         }
-        ledgersDb.delete(deletes);
+
+        batch.flush();
     }
 
     void forceCompaction() throws IOException {

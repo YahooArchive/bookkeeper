@@ -30,6 +30,13 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
     private static final ReadOptions DontCache = new ReadOptions().fillCache(false);
     private static final ReadOptions Cache = new ReadOptions().fillCache(true);
 
+    static KeyValueStorageFactory factory = new KeyValueStorageFactory() {
+        @Override
+        public KeyValueStorage newKeyValueStorage(String path) throws IOException {
+            return new KeyValueStorageLevelDB(path);
+        }
+    };
+
     public KeyValueStorageLevelDB(String path) throws IOException {
         this.path = path;
         Options options = new Options();
@@ -52,22 +59,6 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
     public void put(byte[] key, byte[] value) {
         // log.debug("put key={} value={}", Arrays.toString(key), Arrays.toString(value));
         db.put(key, value, Sync);
-    }
-
-    @Override
-    public void put(Iterable<Entry<byte[], byte[]>> entries) throws IOException {
-        WriteBatch writeBatch = db.createWriteBatch();
-        for (Entry<byte[], byte[]> entry : entries) {
-            // log.debug("batch put key={} value={}", LongPair.fromArray(entry.getKey()),
-            // Arrays.toString(entry.getValue()));
-            writeBatch.put(entry.getKey(), entry.getValue());
-        }
-
-        try {
-            db.write(writeBatch, Sync);
-        } finally {
-            writeBatch.close();
-        }
     }
 
     @Override
@@ -108,20 +99,6 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
     @Override
     public void delete(byte[] key) throws IOException {
         db.delete(key, Sync);
-    }
-
-    @Override
-    public void delete(Iterable<byte[]> keys) throws IOException {
-        WriteBatch writeBatch = db.createWriteBatch();
-        for (byte[] key : keys) {
-            writeBatch.delete(key);
-        }
-
-        try {
-            db.write(writeBatch, Sync);
-        } finally {
-            writeBatch.close();
-        }
     }
 
     @Override
@@ -167,6 +144,35 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
         }
 
         return count;
+    }
+
+    @Override
+    public Batch newBatch() {
+        return new LevelDBBatch();
+    }
+
+    private class LevelDBBatch implements Batch {
+
+        WriteBatch ldbBatch = db.createWriteBatch();
+
+        @Override
+        public void put(byte[] key, byte[] value) {
+            ldbBatch.put(key, value);
+        }
+
+        @Override
+        public void remove(byte[] key) {
+            ldbBatch.delete(key);
+        }
+
+        @Override
+        public void flush() throws IOException {
+            try {
+                db.write(ldbBatch, Sync);
+            } finally {
+                ldbBatch.close();
+            }
+        }
     }
 
     private final static Comparator<byte[]> ByteComparator = UnsignedBytes.lexicographicalComparator();
@@ -220,10 +226,11 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
         };
     }
 
-    private static final byte[] firstKey = new byte[] {0};
+    private static final byte[] firstKey = new byte[] { 0 };
     private static final byte[] lastKey = new byte[32];
+
     static {
-        Arrays.fill(lastKey, (byte)0xFF);
+        Arrays.fill(lastKey, (byte) 0xFF);
     }
 
     @Override
