@@ -814,6 +814,9 @@ class Journal extends BookieCriticalThread implements CheckpointSource {
         long entryId = entry.readLong();
         entry.resetReaderIndex();
         journalQueueSize.inc();
+
+        // Retain entry until it gets written to journal
+        entry.retain();
         queue.add(QueueEntry.create(entry, ledgerId, entryId, cb, ctx, MathUtils.nowInNano(), journalAddEntryStats));
     }
 
