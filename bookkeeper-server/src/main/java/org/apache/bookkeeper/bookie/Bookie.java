@@ -995,6 +995,7 @@ public class Bookie extends BookieCriticalThread {
         if (LOG.isTraceEnabled()) {
             LOG.trace("Adding {}@{}", entryId, ledgerId);
         }
+
         getJournal(ledgerId).logAddEntry(entry, cb, ctx);
     }
 
@@ -1030,11 +1031,14 @@ public class Bookie extends BookieCriticalThread {
                     throw BookieException
                             .create(BookieException.Code.LedgerFencedException);
                 }
+
                 addEntryInternal(handle, entry, cb, ctx);
             }
         } catch (NoWritableLedgerDirException e) {
             transitionToReadOnlyMode();
             throw new IOException(e);
+        } finally {
+            entry.release();
         }
     }
 
