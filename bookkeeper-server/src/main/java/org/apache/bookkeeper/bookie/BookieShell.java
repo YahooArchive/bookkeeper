@@ -18,6 +18,9 @@
 
 package org.apache.bookkeeper.bookie;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -26,7 +29,6 @@ import java.util.Formatter;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
-
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -43,7 +45,6 @@ import org.apache.zookeeper.ZooKeeper;
 import org.apache.bookkeeper.meta.LedgerManagerFactory;
 import org.apache.bookkeeper.meta.LedgerUnderreplicationManager;
 import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
-
 import org.apache.bookkeeper.bookie.EntryLogger.EntryLogScanner;
 import org.apache.bookkeeper.bookie.Journal.JournalScanner;
 import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorage;
@@ -69,10 +70,10 @@ import org.apache.bookkeeper.util.ZkUtils;
 import org.apache.bookkeeper.versioning.Version;
 import org.apache.bookkeeper.versioning.Versioned;
 import org.apache.bookkeeper.zookeeper.ZooKeeperClient;
-
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 
 import com.google.common.util.concurrent.AbstractFuture;
+
 import static com.google.common.base.Charsets.UTF_8;
 
 import org.apache.commons.configuration.Configuration;
@@ -105,6 +106,7 @@ public class BookieShell implements Tool {
     static final String CMD_BOOKIEFORMAT = "bookieformat";
     static final String CMD_RECOVER = "recover";
     static final String CMD_LEDGER = "ledger";
+    static final String CMD_READ_LEDGER_ENTRIES = "readledger";
     static final String CMD_LISTLEDGERS = "listledgers";
     static final String CMD_LEDGERMETADATA = "ledgermetadata";
     static final String CMD_LISTUNDERREPLICATED = "listunderreplicated";
@@ -402,6 +404,84 @@ public class BookieShell implements Tool {
         Options getOptions() {
             return lOpts;
         }
+    }
+
+    /**
+     * Command for reading ledger entries from local bookkeeper
+     */
+    class ReadLedgerEntriesCmd extends MyCommand {
+        Options lOpts = new Options();
+
+        ReadLedgerEntriesCmd() {
+            super(CMD_READ_LEDGER_ENTRIES);
+        }
+
+        @Override
+        Options getOptions() {
+            return lOpts;
+        }
+
+        @Override
+        String getDescription() {
+            return "Read a range of entries from a ledger";
+        }
+
+        @Override
+        String getUsage() {
+            return "readledger <ledger_id> [<start_entry_id> [<end_entry_id>]]";
+        }
+
+        @Override
+        int runCmd(CommandLine cmdLine) throws Exception {
+            String[] leftArgs = cmdLine.getArgs();
+            if (leftArgs.length <= 0) {
+                System.err.println("ERROR: missing ledger id");
+                printUsage();
+                return -1;
+            }
+
+            long ledgerId;
+            long firstEntry = 0;
+            long lastEntry = -1;
+            try {
+                ledgerId = Long.parseLong(leftArgs[0]);
+                if (leftArgs.length >= 2) {
+                    firstEntry = Long.parseLong(leftArgs[1]);
+                }
+                if (leftArgs.length >= 3) {
+                    lastEntry = Long.parseLong(leftArgs[2]);
+                }
+            } catch (NumberFormatException nfe) {
+                System.err.println("ERROR: invalid number " + nfe.getMessage());
+                printUsage();
+                return -1;
+            }
+
+            ClientConfiguration conf = new ClientConfiguration();
+            conf.addConfiguration(bkConf);
+
+            BookKeeperAdmin bk = null;
+            try {
+                bk = new BookKeeperAdmin(conf);
+                Iterator<LedgerEntry> entries = bk.readEntries(ledgerId, firstEntry, lastEntry).iterator();
+                while (entries.hasNext()) {
+                    LedgerEntry entry = entries.next();
+                    ByteBuf data = entry.getEntryBuffer();
+                    System.out.println("Entry Id: " + entry.getEntryId() + ", Data: " + ByteBufUtil.prettyHexDump(data));
+                    data.release();
+                }
+            } catch (Exception e) {
+                LOG.error("Error reading entries from ledger {}", ledgerId, e.getCause());
+                return -1;
+            } finally {
+                if (bk != null) {
+                    bk.close();
+                }
+            }
+
+            return 0;
+        }
+
     }
 
     /**
@@ -1507,6 +1587,7 @@ public class BookieShell implements Tool {
         commands.put(CMD_BOOKIEFORMAT, new BookieFormatCmd());
         commands.put(CMD_RECOVER, new RecoverCmd());
         commands.put(CMD_LEDGER, new LedgerCmd());
+        commands.put(CMD_READ_LEDGER_ENTRIES, new ReadLedgerEntriesCmd());
         commands.put(CMD_LISTLEDGERS, new ListLedgersCmd());
         commands.put(CMD_LISTUNDERREPLICATED, new ListUnderreplicatedCmd());
         commands.put(CMD_WHOISAUDITOR, new WhoIsAuditorCmd());
