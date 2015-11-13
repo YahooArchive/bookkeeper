@@ -1015,6 +1015,8 @@ public class Bookie extends BookieCriticalThread {
         } catch (NoWritableLedgerDirException e) {
             transitionToReadOnlyMode();
             throw new IOException(e);
+        } finally {
+            entry.release();
         }
     }
 
