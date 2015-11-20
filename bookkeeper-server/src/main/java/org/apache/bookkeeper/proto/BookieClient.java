@@ -25,27 +25,26 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.util.HashedWheelTimer;
 import io.netty.util.Recycler;
 import io.netty.util.Recycler.Handle;
+import io.netty.util.concurrent.DefaultThreadFactory;
 
 import java.io.IOException;
-
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import org.apache.bookkeeper.net.BookieSocketAddress;
 
 import org.apache.bookkeeper.auth.AuthProviderFactoryFactory;
 import org.apache.bookkeeper.auth.ClientAuthProvider;
 import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.conf.ClientConfiguration;
+import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.WriteCallback;
@@ -69,10 +68,11 @@ public class BookieClient implements PerChannelBookieClientFactory {
     AtomicLong totalBytesOutstanding = new AtomicLong();
 
     OrderedSafeExecutor executor;
+    ScheduledExecutorService scheduler;
+    boolean ownsScheduler = false;
     EventLoopGroup eventLoopGroup;
     final ConcurrentHashMap<BookieSocketAddress, PerChannelBookieClientPool> channels =
             new ConcurrentHashMap<BookieSocketAddress, PerChannelBookieClientPool>();
-    final HashedWheelTimer requestTimer;
 
     final private ClientAuthProvider.Factory authProviderFactory;
     final private ExtensionRegistry registry;
@@ -89,8 +89,14 @@ public class BookieClient implements PerChannelBookieClientFactory {
         this(conf, eventLoopGroup, executor, NullStatsLogger.INSTANCE);
     }
 
+    public BookieClient(ClientConfiguration conf, EventLoopGroup eventLoopGroup, OrderedSafeExecutor executor,
+            ScheduledExecutorService scheduler) throws IOException {
+        this(conf, eventLoopGroup, executor, scheduler, NullStatsLogger.INSTANCE);
+    }
+
     public BookieClient(ClientConfiguration conf, EventLoopGroup eventLoopGroup,
-                        OrderedSafeExecutor executor, StatsLogger statsLogger) throws IOException {
+ OrderedSafeExecutor executor,
+            ScheduledExecutorService scheduler, StatsLogger statsLogger) throws IOException {
         this.conf = conf;
         this.eventLoopGroup = eventLoopGroup;
         this.executor = executor;
@@ -102,10 +108,24 @@ public class BookieClient implements PerChannelBookieClientFactory {
 
         this.statsLogger = statsLogger;
         this.numConnectionsPerBookie = conf.getNumChannelsPerBookie();
-        this.requestTimer = new HashedWheelTimer(
-                new ThreadFactoryBuilder().setNameFormat("BookieClientTimer-%d").build(),
-                conf.getPCBCTimeoutTimerTickDurationMs(), TimeUnit.MILLISECONDS,
-                conf.getPCBCTimeoutTimerNumTicks());
+        this.scheduler = scheduler;
+        if (conf.getAddEntryTimeout() > 0 || conf.getReadEntryTimeout() > 0) {
+            this.scheduler.scheduleAtFixedRate(new Runnable() {
+
+                @Override
+                public void run() {
+                    monitorPendingOperations();
+                }
+            }, conf.getTimeoutMonitorIntervalSec(),
+                    conf.getTimeoutMonitorIntervalSec(), TimeUnit.SECONDS);
+        }
+    }
+
+    public BookieClient(ClientConfiguration conf, EventLoopGroup eventLoopGroup, OrderedSafeExecutor executor,
+            StatsLogger statsLogger) throws IOException {
+        this(conf, eventLoopGroup, executor, Executors.newSingleThreadScheduledExecutor(new DefaultThreadFactory(
+                "BookKeeperClientScheduler")), statsLogger);
+        ownsScheduler = true;
     }
 
     private int getRc(int rc) {
@@ -122,8 +142,8 @@ public class BookieClient implements PerChannelBookieClientFactory {
 
     @Override
     public PerChannelBookieClient create(BookieSocketAddress address) {
-        return new PerChannelBookieClient(conf, executor, eventLoopGroup, address,
-                requestTimer, authProviderFactory, registry, statsLogger);
+        return new PerChannelBookieClient(conf, executor, eventLoopGroup, address, authProviderFactory, registry,
+                statsLogger);
     }
 
     private PerChannelBookieClientPool lookupClient(BookieSocketAddress addr) {
@@ -378,6 +398,24 @@ public class BookieClient implements PerChannelBookieClientFactory {
             closeLock.readLock().unlock();
         }
     }
+    
+    public void monitorPendingOperations() {
+        for (PerChannelBookieClientPool clientPool : channels.values()) {
+            for (int idx = 0; idx < numConnectionsPerBookie; idx++) {
+                clientPool.obtain(new GenericCallback<PerChannelBookieClient>() {
+
+                    @Override
+                    public void operationComplete(int rc, PerChannelBookieClient result) {
+                        if (rc == BKException.Code.OK) {
+                            result.monitorPendingOperations();
+                        } else {
+                            LOG.warn("Unable to get channel", BKException.create(rc));
+                        }
+                    }
+                }, idx);
+            }
+        }
+    }
 
     public boolean isClosed() {
         return closed;
@@ -391,11 +429,12 @@ public class BookieClient implements PerChannelBookieClientFactory {
                 pool.close(true);
             }
             channels.clear();
+            if (ownsScheduler) {
+                scheduler.shutdownNow();
+            }
         } finally {
             closeLock.writeLock().unlock();
         }
-        // Shut down the timeout executor.
-        this.requestTimer.stop();
     }
 
     private static class Counter {
