@@ -210,7 +210,7 @@ public class BookKeeper {
 
         mainWorkerPool = new OrderedSafeExecutor(conf.getNumWorkerThreads(),
                 "BookKeeperClientWorker");
-        bookieClient = new BookieClient(conf, eventLoopGroup, mainWorkerPool);
+        bookieClient = new BookieClient(conf, eventLoopGroup, mainWorkerPool, scheduler);
         bookieWatcher = new BookieWatcher(conf, scheduler, placementPolicy, this);
         bookieWatcher.readBookiesBlocking();
 
@@ -292,7 +292,7 @@ public class BookKeeper {
 
         mainWorkerPool = new OrderedSafeExecutor(conf.getNumWorkerThreads(),
                 "BookKeeperClientWorker");
-        bookieClient = new BookieClient(conf, eventLoopGroup, mainWorkerPool, statsLogger);
+        bookieClient = new BookieClient(conf, eventLoopGroup, mainWorkerPool, scheduler, statsLogger);
         bookieWatcher = new BookieWatcher(conf, scheduler, placementPolicy, this);
         bookieWatcher.readBookiesBlocking();
 

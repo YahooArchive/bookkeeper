@@ -21,7 +21,10 @@ package org.apache.bookkeeper.proto;
 import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayDeque;
+import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -88,6 +91,7 @@ import io.netty.util.Recycler;
 import io.netty.util.Recycler.Handle;
 import io.netty.util.Timeout;
 import io.netty.util.TimerTask;
+import io.netty.util.concurrent.DefaultThreadFactory;
 
 /**
  * This class manages all details of connection to a particular bookie. It also
@@ -105,9 +109,8 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
     final BookieSocketAddress addr;
     final EventLoopGroup eventLoopGroup;
     final OrderedSafeExecutor executor;
-    final HashedWheelTimer requestTimer;
-    final int addEntryTimeout;
-    final int readEntryTimeout;
+    final long addEntryTimeoutNano;
+    final long readEntryTimeoutNano;
 
     private final ConcurrentOpenHashMap<CompletionKey, CompletionValue> completionObjects = new ConcurrentOpenHashMap<CompletionKey, CompletionValue>();
 
@@ -147,13 +150,12 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
                                   BookieSocketAddress addr,
                                   ClientAuthProvider.Factory authProviderFactory,
                                   ExtensionRegistry extRegistry) {
-        this(new ClientConfiguration(), executor, eventLoopGroup, addr, null,
+        this(new ClientConfiguration(), executor, eventLoopGroup, addr,
              authProviderFactory, extRegistry, NullStatsLogger.INSTANCE);
     }
 
     public PerChannelBookieClient(ClientConfiguration conf, OrderedSafeExecutor executor,
             EventLoopGroup eventLoopGroup, BookieSocketAddress addr,
-                                  HashedWheelTimer requestTimer,
                                   ClientAuthProvider.Factory authProviderFactory,
                                   ExtensionRegistry extRegistry,
                                   StatsLogger parentStatsLogger) {
@@ -162,9 +164,6 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         this.executor = executor;
         this.eventLoopGroup = eventLoopGroup;
         this.state = ConnectionState.DISCONNECTED;
-        this.requestTimer = requestTimer;
-        this.addEntryTimeout = conf.getAddEntryTimeout();
-        this.readEntryTimeout = conf.getReadEntryTimeout();
         this.useV2WireProtocol = conf.getUseV2WireProtocol();
 
         this.authProviderFactory = authProviderFactory;
@@ -181,6 +180,8 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         addEntryOpLogger = statsLogger.getOpStatsLogger(BookKeeperClientStats.CHANNEL_ADD_OP);
         readTimeoutOpLogger = statsLogger.getOpStatsLogger(BookKeeperClientStats.CHANNEL_TIMEOUT_READ);
         addTimeoutOpLogger = statsLogger.getOpStatsLogger(BookKeeperClientStats.CHANNEL_TIMEOUT_ADD);
+        addEntryTimeoutNano = TimeUnit.SECONDS.toNanos(conf.getAddEntryTimeout());
+        readEntryTimeoutNano = TimeUnit.SECONDS.toNanos(conf.getReadEntryTimeout());
     }
 
     private void completeOperation(GenericCallback<PerChannelBookieClient> op, int rc) {
@@ -367,13 +368,11 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             request = BookieProtocol.AddRequest.create(BookieProtocol.CURRENT_PROTOCOL_VERSION, ledgerId, entryId,
                     (short) options, masterKey, toSend);
             completion = V2CompletionKey.get(this, ledgerId, entryId, OperationType.ADD_ENTRY);
-            completionObjects.put(completion,
-                    AddCompletion.get(this, cb, ctx, ledgerId, entryId, scheduleTimeout(completion, addEntryTimeout), completion));
+            completionObjects.put(completion, AddCompletion.get(this, cb, ctx, ledgerId, entryId, completion));
         } else {
             final long txnId = getTxnId();
             final CompletionKey completionKey = new CompletionKey(this, txnId, OperationType.ADD_ENTRY);
-            completionObjects.put(completionKey, AddCompletion.get(this, cb, ctx, ledgerId, entryId,
-                    scheduleTimeout(completionKey, addEntryTimeout), completionKey));
+            completionObjects.put(completionKey, AddCompletion.get(this, cb, ctx, ledgerId, entryId, completionKey));
 
             // Build the request and calculate the total size to be included in the packet.
             BKPacketHeader.Builder headerBuilder = BKPacketHeader.newBuilder()
@@ -496,8 +495,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         }
 
         final CompletionKey completionKey = completion;
-        ReadCompletion readCompletion = new ReadCompletion(readEntryOpLogger, cb,
-                ctx, ledgerId, entryId, scheduleTimeout(completion, readEntryTimeout));
+        ReadCompletion readCompletion = new ReadCompletion(readEntryOpLogger, cb, ctx, ledgerId, entryId);
         CompletionValue existingValue = completionObjects.putIfAbsent(completion, readCompletion);
         if (existingValue != null) {
             // There's a pending read request on same ledger/entry. Use the multimap to track all of them
@@ -567,8 +565,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
 
         final Object readRequest = request;
         final CompletionKey completionKey = completion;
-        ReadCompletion readCompletion = new ReadCompletion(readEntryOpLogger, cb,
-                ctx, ledgerId, entryId, scheduleTimeout(completion, readEntryTimeout));
+        ReadCompletion readCompletion = new ReadCompletion(readEntryOpLogger, cb, ctx, ledgerId, entryId);
         CompletionValue existingValue = completionObjects.putIfAbsent(completion, readCompletion);
         if (existingValue != null) {
             // There's a pending read request on same ledger/entry. Use the multimap to track all of them
@@ -606,6 +603,47 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             LOG.warn("Read entry operation {} failed", readRequest, e);
             errorOutReadKey(completionKey);
         }
+    }
+
+    public void monitorPendingOperations() {
+        int timedoutOperations = 0;
+        for (CompletionKey key : completionObjects.keys()) {
+            CompletionValue value = completionObjects.get(key);
+            if (checkAndFailOperation(key, value)) {
+                ++timedoutOperations;
+            }
+        }
+        for (CompletionKey key : completionObjectsV2Conflicts.keys()) {
+            for (CompletionValue value : completionObjectsV2Conflicts.get(key)) {
+                if (checkAndFailOperation(key, value)) {
+                    ++timedoutOperations;
+                }
+            }
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Successfully timed-out {} operations to channel {} for {}", new Object[] { timedoutOperations,
+                    channel, addr });
+        }
+    }
+
+    private boolean checkAndFailOperation(CompletionKey key, CompletionValue value) {
+        if (value != null) {
+            long elapsedTime = MathUtils.elapsedNanos(value.startTime);
+            if (OperationType.ADD_ENTRY == key.operationType) {
+                if (elapsedTime >= addEntryTimeoutNano) {
+                    errorOutAddKey(key);
+                    addTimeoutOpLogger.registerSuccessfulEvent(elapsedTime, TimeUnit.NANOSECONDS);
+                    return true;
+                }
+            } else {
+                if (elapsedTime >= readEntryTimeoutNano) {
+                    errorOutReadKey(key);
+                    readTimeoutOpLogger.registerSuccessfulEvent(elapsedTime, TimeUnit.NANOSECONDS);
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -659,6 +697,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
                 cf.awaitUninterruptibly();
             }
         }
+
     }
 
     private ChannelFuture closeChannel(Channel c) {
@@ -1077,27 +1116,20 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         final Object ctx;
         protected long ledgerId;
         protected long entryId;
-        protected Timeout timeout;
+        protected long startTime;
 
         public CompletionValue() {
             this.ctx = null;
             this.ledgerId = -1;
             this.entryId = -1;
-            this.timeout = null;
+            this.startTime = MathUtils.nowInNano();
         }
 
-        public CompletionValue(Object ctx, long ledgerId, long entryId,
-                               Timeout timeout) {
+        public CompletionValue(Object ctx, long ledgerId, long entryId) {
             this.ctx = ctx;
             this.ledgerId = ledgerId;
             this.entryId = entryId;
-            this.timeout = timeout;
-        }
-
-        void cancelTimeout() {
-            if (null != timeout) {
-                timeout.cancel();
-            }
+            this.startTime = MathUtils.nowInNano();
         }
     }
 
@@ -1107,20 +1139,16 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
 
         public ReadCompletion(ReadEntryCallback cb, Object ctx,
                               long ledgerId, long entryId) {
-            this(null, cb, ctx, ledgerId, entryId, null);
+            this(null, cb, ctx, ledgerId, entryId);
         }
 
         public ReadCompletion(final OpStatsLogger readEntryOpLogger,
                               final ReadEntryCallback originalCallback,
-                              final Object originalCtx, final long ledgerId, final long entryId,
-                              final Timeout timeout) {
-            super(originalCtx, ledgerId, entryId, timeout);
-            final long startTime = MathUtils.nowInNano();
+                final Object originalCtx, final long ledgerId, final long entryId) {
+            super(originalCtx, ledgerId, entryId);
             this.cb = null == readEntryOpLogger ? originalCallback : new ReadEntryCallback() {
                 @Override
                 public void readEntryComplete(int rc, long ledgerId, long entryId, ByteBuf buffer, Object ctx) {
-                    cancelTimeout();
-
                     long latency = MathUtils.elapsedNanos(startTime);
                     if (rc != BKException.Code.OK) {
                         readEntryOpLogger.registerFailedEvent(latency, TimeUnit.NANOSECONDS);
@@ -1143,18 +1171,16 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
     static class AddCompletion extends CompletionValue implements WriteCallback {
         WriteCallback cb;
         PerChannelBookieClient pcbc;
-        long startTime;
         WriteCallback originalCallback;
         Object originalCtx;
         CompletionKey completionKey;
 
         public static AddCompletion get(PerChannelBookieClient pcbc, WriteCallback originalCallback, Object originalCtx,
-                long ledgerId, long entryId, Timeout timeout, CompletionKey completionKey) {
+ long ledgerId, long entryId, CompletionKey completionKey) {
             AddCompletion addCompletion = RECYCLER.get();
             addCompletion.originalCtx = originalCtx;
             addCompletion.ledgerId = ledgerId;
             addCompletion.entryId = entryId;
-            addCompletion.timeout = timeout;
             addCompletion.pcbc = pcbc;
             addCompletion.startTime = MathUtils.nowInNano();
             addCompletion.originalCallback = originalCallback;
@@ -1165,7 +1191,6 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
 
         @Override
         public void writeComplete(int rc, long ledgerId, long entryId, BookieSocketAddress addr, Object ctx) {
-            cancelTimeout();
             long latency = MathUtils.elapsedNanos(startTime);
             if (rc != BKException.Code.OK) {
                 pcbc.addEntryOpLogger.registerFailedEvent(latency, TimeUnit.NANOSECONDS);
@@ -1207,15 +1232,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         return new CompletionKey(this, txnId, operationType);
     }
 
-    Timeout scheduleTimeout(CompletionKey key, long timeout) {
-        if (timeout > 0 && null != requestTimer) {
-            return requestTimer.newTimeout(key, timeout, TimeUnit.SECONDS);
-        } else {
-            return null;
-        }
-    }
-
-    static class CompletionKey implements TimerTask {
+    static class CompletionKey {
         PerChannelBookieClient pcbc;
         long txnId;
         OperationType operationType;
@@ -1245,24 +1262,6 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         @Override
         public String toString() {
             return String.format("TxnId(%d), OperationType(%s)", txnId, operationType);
-        }
-
-        private long elapsedTime() {
-            return MathUtils.elapsedNanos(requestAt);
-        }
-
-        @Override
-        public void run(Timeout timeout) throws Exception {
-            if (timeout.isCancelled()) {
-                return;
-            }
-            if (OperationType.ADD_ENTRY == operationType) {
-                pcbc.errorOutAddKey(this);
-                pcbc.addTimeoutOpLogger.registerSuccessfulEvent(elapsedTime(), TimeUnit.NANOSECONDS);
-            } else {
-                pcbc.errorOutReadKey(this);
-                pcbc.readTimeoutOpLogger.registerSuccessfulEvent(elapsedTime(), TimeUnit.NANOSECONDS);
-            }
         }
 
         void recycle() {
