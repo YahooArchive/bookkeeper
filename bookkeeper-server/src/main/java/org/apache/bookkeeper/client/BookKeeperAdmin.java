@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -37,6 +38,7 @@ import java.util.Random;
 import java.util.UUID;
 
 import org.apache.bookkeeper.client.AsyncCallback.OpenCallback;
+import org.apache.bookkeeper.client.AsyncCallback.ReadCallback;
 import org.apache.bookkeeper.client.AsyncCallback.RecoverCallback;
 import org.apache.bookkeeper.client.BookKeeper.SyncOpenCallback;
 import org.apache.bookkeeper.client.LedgerFragmentReplicator.SingleFragmentCallback;
@@ -364,7 +366,16 @@ public class BookKeeperAdmin {
             }
             if (lastEntryId == -1 || nextEntryId <= lastEntryId) {
                 try {
-                    currentEntry = handle.readEntries(nextEntryId, nextEntryId).nextElement();
+                    SyncCounter counter = new SyncCounter();
+                    counter.inc();
+
+                    handle.asyncReadEntriesInternal(nextEntryId, nextEntryId, new LedgerHandle.SyncReadCallback(),
+                            counter);
+                    counter.block(0);
+                    if (counter.getrc() != BKException.Code.OK) {
+                        throw BKException.create(counter.getrc());
+                    }
+                    currentEntry = counter.getSequence().nextElement();
                     return true;
                 } catch (Exception e) {
                     if (e instanceof BKException.BKNoSuchEntryException && lastEntryId == -1) {
