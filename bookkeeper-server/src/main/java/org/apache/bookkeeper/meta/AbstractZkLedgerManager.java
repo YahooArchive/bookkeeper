@@ -204,10 +204,10 @@ abstract class AbstractZkLedgerManager implements LedgerManager, Watcher {
                         LOG.debug("Removed ledger metadata listeners on ledger {} : {}",
                                 ledgerId, listenerSet);
                     }
-                    for(LedgerMetadataListener l : listenerSet) {
-                        unregisterLedgerMetadataListener(ledgerId, l);
+                    for (LedgerMetadataListener l : listenerSet) {
                         l.onChanged( ledgerId, null );
                     }
+                    listeners.remove(ledgerId, listenerSet);
                 }
             } else {
                 if (LOG.isDebugEnabled()) {
