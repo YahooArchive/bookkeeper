@@ -1046,8 +1046,8 @@ public class ServerConfiguration extends AbstractConfiguration {
      *
      * @return max wait for grouping
      */
-    public long getJournalMaxGroupWaitMSec() {
-        return getLong(JOURNAL_MAX_GROUP_WAIT_MSEC, 200);
+    public double getJournalMaxGroupWaitMSec() {
+        return getDouble(JOURNAL_MAX_GROUP_WAIT_MSEC, 200.0);
     }
 
     /**

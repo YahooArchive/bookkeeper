@@ -606,7 +606,7 @@ class Journal extends BookieCriticalThread implements CheckpointSource {
         this.journalWriteBufferSize = conf.getJournalWriteBufferSizeKB() * KB;
         this.maxBackupJournals = conf.getMaxBackupJournals();
         this.forceWriteThread = new ForceWriteThread(this, conf.getJournalAdaptiveGroupWrites());
-        this.maxGroupWaitInNanos = TimeUnit.MILLISECONDS.toNanos(conf.getJournalMaxGroupWaitMSec());
+        this.maxGroupWaitInNanos = (long) (TimeUnit.MILLISECONDS.toNanos(1) * conf.getJournalMaxGroupWaitMSec());
         this.bufferedWritesThreshold = conf.getJournalBufferedWritesThreshold();
         this.bufferedEntriesThreshold = conf.getJournalBufferedEntriesThreshold();
         this.cbThreadPool = Executors.newFixedThreadPool(conf.getNumJournalCallbackThreads(),
