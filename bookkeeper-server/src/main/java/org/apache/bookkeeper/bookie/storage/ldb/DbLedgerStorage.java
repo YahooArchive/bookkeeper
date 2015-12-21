@@ -561,11 +561,6 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
             long location = entryLogger.addEntry(ledgerId, content.nioBuffer(), true);
             locationMap.put(ledgerId, new LongPair(entryId, location));
-
-            // While we have space in the read cache, we transfer entries from the write cache
-            if (readCache.size() < maxReadCacheSizeBelowThreshold) {
-                readCache.putNoCopy(ledgerId, entryId, content);
-            }
         }
 
         entryLogger.flush();
