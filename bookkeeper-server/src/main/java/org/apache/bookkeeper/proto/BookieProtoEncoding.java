@@ -414,23 +414,18 @@ public class BookieProtoEncoding {
                 return;
             }
             ByteBuf buffer = (ByteBuf) msg;
-            try {
-                buffer.markReaderIndex();
+            buffer.markReaderIndex();
 
-                if (usingV3Protocol) {
-                    try {
-                        out.add(REQ_V3.decode(buffer));
-                    } catch (InvalidProtocolBufferException e) {
-                        usingV3Protocol = false;
-                        buffer.resetReaderIndex();
-                        out.add(REQ_PREV3.decode(buffer));
-                    }
-                } else {
+            if (usingV3Protocol) {
+                try {
+                    out.add(REQ_V3.decode(buffer));
+                } catch (InvalidProtocolBufferException e) {
+                    usingV3Protocol = false;
+                    buffer.resetReaderIndex();
                     out.add(REQ_PREV3.decode(buffer));
                 }
-            } catch (Exception e) {
-                LOG.error("Failed to decode a request from {} : ", ctx.channel(), e);
-                ctx.close();
+            } else {
+                out.add(REQ_PREV3.decode(buffer));
             }
         }
     }
@@ -483,24 +478,19 @@ public class BookieProtoEncoding {
                 out.add(msg);
             }
             ByteBuf buffer = (ByteBuf) msg;
-            try {
-                buffer.markReaderIndex();
-                
-                if (usingV3Protocol) {
-                    try {
-                        out.add(REP_V3.decode(buffer));
-                    } catch (InvalidProtocolBufferException e) {
-                        usingV3Protocol = false;
-                        buffer.resetReaderIndex();
-                        out.add(REP_PREV3.decode(buffer));
-                    }
-                } else {
-                    // If in the same connection we already got preV3 messages, don't try again to decode V3 messages
+            buffer.markReaderIndex();
+
+            if (usingV3Protocol) {
+                try {
+                    out.add(REP_V3.decode(buffer));
+                } catch (InvalidProtocolBufferException e) {
+                    usingV3Protocol = false;
+                    buffer.resetReaderIndex();
                     out.add(REP_PREV3.decode(buffer));
                 }
-            } catch (Exception e) {
-                LOG.error("Failed to decode a response from channel {} : ", ctx.channel(), e);
-                ctx.close();
+            } else {
+                // If in the same connection we already got preV3 messages, don't try again to decode V3 messages
+                out.add(REP_PREV3.decode(buffer));
             }
         }
     }
