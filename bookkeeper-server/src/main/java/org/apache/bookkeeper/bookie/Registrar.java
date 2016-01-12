@@ -22,7 +22,8 @@
 package org.apache.bookkeeper.bookie;
 
 import com.google.common.util.concurrent.AbstractFuture;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
+import io.netty.util.concurrent.DefaultThreadFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -70,8 +71,7 @@ class Registrar implements Closeable {
     private final FatalErrorHandler fatalErrorHandler;
 
     Registrar(ServerConfiguration conf, String myId, FatalErrorHandler handler) {
-        executor = Executors.newSingleThreadScheduledExecutor(
-                new ThreadFactoryBuilder().setNameFormat("bookie-reg-%s").build());
+        executor = Executors.newSingleThreadScheduledExecutor(new DefaultThreadFactory("bookie-reg"));
         this.conf = conf;
 
         this.zkBookieRegPath = conf.getZkAvailableBookiesPath() + "/" + myId;

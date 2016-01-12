@@ -2,6 +2,7 @@ package org.apache.bookkeeper.bookie.storage.ldb;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import io.netty.buffer.ByteBuf;
+import io.netty.util.concurrent.DefaultThreadFactory;
 
 import java.io.IOException;
 import java.util.List;
@@ -39,7 +40,6 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.RateLimiter;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.ByteString;
 
 public class DbLedgerStorage implements CompactableLedgerStorage {
@@ -66,8 +66,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     private final AtomicBoolean hasFlushBeenTriggered = new AtomicBoolean(false);
     private final AtomicBoolean isFlushInProgress = new AtomicBoolean(false);
 
-    private final ExecutorService executor = Executors
-            .newCachedThreadPool(new ThreadFactoryBuilder().setNameFormat("db-storage-%s").build());
+    private final ExecutorService executor = Executors.newCachedThreadPool(new DefaultThreadFactory("db-storage"));
 
     static final String WRITE_CACHE_MAX_SIZE_MB = "dbStorage_writeCacheMaxSizeMb";
     static final String WRITE_CACHE_CHUNK_SIZE_MB = "dbStorage_writeCacheChunkSizeMb";

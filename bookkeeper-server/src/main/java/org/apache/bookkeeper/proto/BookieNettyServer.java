@@ -41,6 +41,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
+import io.netty.util.concurrent.DefaultThreadFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -59,7 +60,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.ExtensionRegistry;
 
 /**
@@ -87,7 +87,7 @@ class BookieNettyServer {
         this.requestProcessor = processor;
         this.authProviderFactory = AuthProviderFactoryFactory.newBookieAuthProviderFactory(conf, registry);
 
-        ThreadFactory threadFactory = new ThreadFactoryBuilder().setNameFormat("bookie-io-%s").build();
+        ThreadFactory threadFactory = new DefaultThreadFactory("bookie-io");
         final int numThreads = Runtime.getRuntime().availableProcessors() * 2;
 
         EventLoopGroup eventLoopGroup;

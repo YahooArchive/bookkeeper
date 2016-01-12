@@ -35,7 +35,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
+import io.netty.util.concurrent.DefaultThreadFactory;
 
 /**
  * SyncThread is a background thread which help checkpointing ledger storage
@@ -70,9 +71,7 @@ class SyncThread {
         this.dirsListener = dirsListener;
         this.ledgerStorage = ledgerStorage;
         this.checkpointSource = checkpointSource;
-        ThreadFactoryBuilder tfb = new ThreadFactoryBuilder()
-            .setNameFormat("SyncThread-" + conf.getBookiePort() + "-%d");
-        this.executor = Executors.newSingleThreadScheduledExecutor(tfb.build());
+        this.executor = Executors.newSingleThreadScheduledExecutor(new DefaultThreadFactory("SyncThread"));
         flushInterval = conf.getFlushInterval();
         LOG.debug("Flush Interval : {}", flushInterval);
     }
