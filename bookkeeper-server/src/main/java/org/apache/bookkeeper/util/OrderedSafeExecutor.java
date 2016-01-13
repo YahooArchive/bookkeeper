@@ -17,12 +17,14 @@
  */
 package org.apache.bookkeeper.util;
 
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import io.netty.util.concurrent.DefaultThreadFactory;
+
 import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -70,16 +72,11 @@ public class OrderedSafeExecutor {
         threads = new ExecutorService[numThreads];
         threadIds = new long[numThreads];
         for (int i = 0; i < numThreads; i++) {
-            StringBuilder thName = new StringBuilder(threadName);
-            thName.append("-");
-            thName.append(i);
-            thName.append("-%d");
-            ThreadFactoryBuilder tfb = new ThreadFactoryBuilder()
-                    .setNameFormat(thName.toString());
+            ThreadFactory tfb = new DefaultThreadFactory(threadName);
             threads[i] = new ThreadPoolExecutor(1, 1,
                     0L, TimeUnit.MILLISECONDS,
                     new UnboundArrayBlockingQueue<Runnable>(),
-                    tfb.build());
+                    tfb);
             final int tid = i;
             try {
                 threads[i].submit(new SafeRunnable() {

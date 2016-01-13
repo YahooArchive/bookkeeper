@@ -23,6 +23,7 @@ package org.apache.bookkeeper.client;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.util.concurrent.DefaultThreadFactory;
 
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
@@ -55,8 +56,6 @@ import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooKeeper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 /**
  * BookKeeper client. We assume there is one single writer to a ledger at any
@@ -199,10 +198,8 @@ public class BookKeeper {
         ZooKeeperWatcherBase w = new ZooKeeperWatcherBase(conf.getZkTimeout());
         this.zk = ZkUtils
                 .createConnectedZookeeperClient(conf.getZkServers(), w);
-        ThreadFactoryBuilder tfb = new ThreadFactoryBuilder();
         this.eventLoopGroup = getDefaultEventLoopGroup();
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(tfb
-                .setNameFormat("BookKeeperClientScheduler-%d").build());
+        this.scheduler = Executors.newSingleThreadScheduledExecutor(new DefaultThreadFactory("BookKeeperClientScheduler"));
         this.statsLogger = NullStatsLogger.INSTANCE;
         initOpLoggers(this.statsLogger);
         // initialize the ensemble placement
@@ -280,10 +277,8 @@ public class BookKeeper {
         this.conf = conf;
         this.zk = zk;
         this.eventLoopGroup = eventLoopGroup;
-        ThreadFactoryBuilder tfb = new ThreadFactoryBuilder().setNameFormat(
-                "BookKeeperClientScheduler-%d");
         this.scheduler = Executors
-                .newSingleThreadScheduledExecutor(tfb.build());
+                .newSingleThreadScheduledExecutor(new DefaultThreadFactory("BookKeeperClientScheduler"));
         this.statsLogger = statsLogger.scope(BookKeeperClientStats.CLIENT_SCOPE);
         initOpLoggers(this.statsLogger);
 
@@ -902,7 +897,7 @@ public class BookKeeper {
     OpStatsLogger getAddOpLogger() { return addOpLogger; }
 
     static EventLoopGroup getDefaultEventLoopGroup() {
-        ThreadFactory threadFactory = new ThreadFactoryBuilder().setNameFormat("bookkeeper-io-%s").build();
+        ThreadFactory threadFactory = new DefaultThreadFactory("bookkeeper-io");
         final int numThreads = Runtime.getRuntime().availableProcessors() * 2;
 
         if (SystemUtils.IS_OS_LINUX) {
