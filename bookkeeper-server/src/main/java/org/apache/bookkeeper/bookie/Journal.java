@@ -960,11 +960,12 @@ class Journal extends BookieCriticalThread implements CheckpointSource {
                             forceWriteBatchEntriesStats.registerSuccessfulValue(toFlush.size());
                             forceWriteBatchBytesStats.registerSuccessfulValue(batchSize);
 
-                            forceWriteRequests.put(createForceWriteRequest(logFile, logId, lastFlushPosition, toFlush, (lastFlushPosition > maxJournalSize), false));
+                            boolean shouldRolloverJournal = (lastFlushPosition > maxJournalSize);
+                            forceWriteRequests.put(createForceWriteRequest(logFile, logId, lastFlushPosition, toFlush, shouldRolloverJournal, false));
                             toFlush = RecyclableArrayList.newInstance();
                             batchSize = 0L;
                             // check whether journal file is over file limit
-                            if (fc.position() > maxJournalSize) {
+                            if (shouldRolloverJournal) {
                                 logFile = null;
                                 continue;
                             }
