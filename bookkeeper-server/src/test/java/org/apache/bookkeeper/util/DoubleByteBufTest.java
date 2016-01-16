@@ -70,6 +70,12 @@ public class DoubleByteBufTest {
         assertEquals(6, dst4.readableBytes());
         assertEquals(0, dst4.writableBytes());
         assertEquals(Unpooled.wrappedBuffer(new byte[] { 0, 3, 4, 5, 0, 0 }), dst4);
+
+        ByteBuf dst5 = Unpooled.wrappedBuffer(new byte[] { 0, 0, 0, 0, 0, 0 });
+        buf.getBytes(3, dst5, 1, 3);
+        assertEquals(6, dst5.readableBytes());
+        assertEquals(0, dst5.writableBytes());
+        assertEquals(Unpooled.wrappedBuffer(new byte[] { 0, 4, 5, 6, 0, 0 }), dst5);
     }
 
     @Test(timeout = 30000)

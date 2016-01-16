@@ -180,11 +180,12 @@ public class DoubleByteBuf extends AbstractReferenceCountedByteBuf {
         int b1Length = Math.min(length, b1.readableBytes() - index);
         if (b1Length > 0) {
             b1.getBytes(b1.readerIndex() + index, dst, dstIndex, b1Length);
+            dstIndex += b1Length;
+            length -= b1Length;
+            index = 0;
+        } else {
+            index -= b1.readableBytes();
         }
-
-        index -= b1.readableBytes() - b1Length;
-        dstIndex += b1Length;
-        length -= b1Length;
 
         if (length > 0) {
             int b2Length = Math.min(length, b2.readableBytes() - index);
