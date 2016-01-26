@@ -17,12 +17,11 @@
  */
 package org.apache.bookkeeper.client;
 
+import static com.google.common.base.Preconditions.checkNotNull;
 import io.netty.buffer.ByteBuf;
 import io.netty.util.Recycler;
-import io.netty.util.ReferenceCountUtil;
 import io.netty.util.Recycler.Handle;
-
-import static com.google.common.base.Preconditions.checkNotNull;
+import io.netty.util.ReferenceCountUtil;
 
 import java.util.concurrent.TimeUnit;
 
@@ -68,7 +67,7 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
     long requestTimeNanos;
     OpStatsLogger addOpLogger;
     long currentLedgerLength;
-    int writeResponsesReceived;
+    int pendingWriteRequests;
 
     static PendingAddOp create(LedgerHandle lh, ByteBuf payload, AddCallback cb, Object ctx) {
         PendingAddOp op = RECYCLER.get();
@@ -82,7 +81,7 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
         op.completed = false;
         op.ackSet = lh.distributionSchedule.getAckSet();
         op.addOpLogger = lh.bk.getAddOpLogger();
-        op.writeResponsesReceived = 0;
+        op.pendingWriteRequests = 0;
         return op;
     }
 
@@ -110,6 +109,7 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
 
         lh.bk.bookieClient.addEntry(lh.metadata.currentEnsemble.get(bookieIndex), lh.ledgerId, lh.ledgerKey, entryId, toSend,
                 this, bookieIndex, flags);
+        ++pendingWriteRequests;
     }
 
     void unsetSuccessAndSendWriteRequest(int bookieIndex) {
@@ -178,12 +178,12 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
     @Override
     public void writeComplete(int rc, long ledgerId, long entryId, BookieSocketAddress addr, Object ctx) {
         int bookieIndex = (Integer) ctx;
-        ++writeResponsesReceived;
+        --pendingWriteRequests;
 
         if (completed) {
             // I am already finished, ignore incoming responses.
             // otherwise, we might hit the following error handling logic, which might cause bad things.
-            if (writeResponsesReceived == lh.metadata.getWriteQuorumSize()) {
+            if (pendingWriteRequests == 0) {
                 recycle();
             }
             return;
@@ -211,7 +211,6 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
             LOG.warn("Write did not succeed: L{} E{} on {}, rc = {}",
                      new Object[] { ledgerId, entryId, addr, rc });
             lh.handleBookieFailure(addr, bookieIndex);
-            --writeResponsesReceived;
             return;
         }
 
@@ -248,7 +247,7 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
         }
         cb.addComplete(rc, lh, entryId, ctx);
 
-        if (writeResponsesReceived == lh.metadata.getWriteQuorumSize()) {
+        if (pendingWriteRequests == 0) {
             recycle();
         }
     }
