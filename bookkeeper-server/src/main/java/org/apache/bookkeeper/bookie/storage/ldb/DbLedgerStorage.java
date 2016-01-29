@@ -52,10 +52,10 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     private GarbageCollectorThread gcThread;
 
     // Write cache where all new entries are inserted into
-    private EntryCache writeCache = new EntryCache();
+    protected EntryCache writeCache = new EntryCache();
 
     // Write cache that is used to swap with writeCache during flushes
-    private EntryCache writeCacheBeingFlushed = new EntryCache();
+    protected EntryCache writeCacheBeingFlushed = new EntryCache();
 
     // Cache where we insert entries for speculative reading
     private final EntryCache readCache = new EntryCache();
@@ -63,8 +63,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     private final AtomicLong writeCacheSizeTrimmed = new AtomicLong(0);
     private final ReentrantReadWriteLock writeCacheMutex = new ReentrantReadWriteLock();
 
-    private final AtomicBoolean hasFlushBeenTriggered = new AtomicBoolean(false);
-    private final AtomicBoolean isFlushInProgress = new AtomicBoolean(false);
+    protected final AtomicBoolean hasFlushBeenTriggered = new AtomicBoolean(false);
 
     private final ExecutorService executor = Executors.newCachedThreadPool(new DefaultThreadFactory("db-storage"));
 
@@ -83,8 +82,6 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     private static final long DEFAULT_ENTRY_LOCATION_CACHE_MAX_SIZE_MB = 16;
 
     private static final int MB = 1024 * 1024;
-
-    private static final int DEFAULT_SLEEP_TIME_MS_WHEN_FLUSH_IN_PROGRESS = 10;
 
     private long writeCacheMaxSize;
 
@@ -308,11 +305,9 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         writeCacheMutex.readLock().lock();
         try {
             if (writeCache.size() >= writeCacheMaxSize) {
-                waitIfFlushInProgress();
-
                 // If the flush has already been triggered or flush has already switched the cache, we don't need to
                 // trigger another flush
-                if (writeCache.size() >= writeCacheMaxSize && hasFlushBeenTriggered.compareAndSet(false, true)) {
+                if (hasFlushBeenTriggered.compareAndSet(false, true)) {
                     // Trigger an early flush in background
                     executor.execute(new Runnable() {
                         @Override
@@ -325,10 +320,13 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
                         }
                     });
                 }
+
+                if (!writeCacheBeingFlushed.isEmpty()) {
+                    // If both caches are full, we have no more space to hold new entries and we must fail the request
+                    throw new IOException("Write cache is full, cannot add entry " + ledgerId + "@" + entryId);
+                }
             }
             writeCache.put(ledgerId, entryId, entry);
-        } catch (InterruptedException e) {
-            throw new IOException(e);
         } finally {
             writeCacheMutex.readLock().unlock();
         }
@@ -526,7 +524,6 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         long startTime = MathUtils.nowInNano();
 
         writeCacheMutex.writeLock().lock();
-        isFlushInProgress.compareAndSet(false, true);
 
         long sizeTrimmed;
         try {
@@ -573,7 +570,6 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
         // Discard all the entry from the write cache, since they're now persisted
         writeCacheBeingFlushed.clear();
-        isFlushInProgress.set(false);
 
         long flushTime = MathUtils.elapsedNanos(startTime);
         double flushThroughput = sizeToFlush / 1024 / 1024 / flushTime / 1e9;
@@ -660,12 +656,6 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
     public void forceIndexCompaction() throws IOException {
         ledgerIndex.forceCompaction();
         entryLocationIndex.forceCompaction();
-    }
-
-    private void waitIfFlushInProgress() throws InterruptedException {
-        while (isFlushInProgress.get()) {
-            Thread.sleep(DEFAULT_SLEEP_TIME_MS_WHEN_FLUSH_IN_PROGRESS);
-        }
     }
 
     // No mbeans to expose
