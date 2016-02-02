@@ -20,12 +20,15 @@
  */
 package org.apache.bookkeeper.proto;
 
-import com.google.common.base.Preconditions;
+import java.util.concurrent.atomic.AtomicLong;
+
 import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.util.MathUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.base.Preconditions;
 
 /**
  *  Provide a simple round-robin style channel pool. We could improve it later to do more
@@ -39,6 +42,7 @@ class DefaultPerChannelBookieClientPool implements PerChannelBookieClientPool,
     final PerChannelBookieClientFactory factory;
     final BookieSocketAddress address;
     final PerChannelBookieClient[] clients;
+    final AtomicLong errorCounter;
 
     DefaultPerChannelBookieClientPool(PerChannelBookieClientFactory factory,
                                       BookieSocketAddress address,
@@ -47,8 +51,9 @@ class DefaultPerChannelBookieClientPool implements PerChannelBookieClientPool,
         this.factory = factory;
         this.address = address;
         this.clients = new PerChannelBookieClient[coreSize];
+        this.errorCounter = new AtomicLong();
         for (int i = 0; i < coreSize; i++) {
-            this.clients[i] = factory.create(address);
+            this.clients[i] = factory.create(address, this);
         }
     }
 
@@ -72,6 +77,11 @@ class DefaultPerChannelBookieClientPool implements PerChannelBookieClientPool,
         }
         int idx = MathUtils.signSafeMod(key, clients.length);
         clients[idx].connectIfNeededAndDoOp(callback);
+    }
+
+    @Override
+    public void recordError() {
+        errorCounter.incrementAndGet();
     }
 
     @Override

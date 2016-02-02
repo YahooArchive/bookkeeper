@@ -95,6 +95,8 @@ public abstract class BKException extends Exception {
             return new BKClientClosedException();
         case Code.IllegalOpException:
             return new BKIllegalOpException();
+        case Code.TimeoutException:
+            return new BKTimeoutException();
         default:
             return new BKUnexpectedConditionException();
         }
@@ -126,6 +128,7 @@ public abstract class BKException extends Exception {
         int MetaStoreException = -18;
         int ClientClosedException = -19;
         int EntryTrimmedException = -20;
+        int TimeoutException = -23;
 
         int IllegalOpException = -100;
         int LedgerFencedException = -101;
@@ -204,6 +207,8 @@ public abstract class BKException extends Exception {
             return "BookKeeper client is closed";
         case Code.IllegalOpException:
             return "Invalid operation";
+        case Code.TimeoutException:
+            return "Bookie operation timeout";
         default:
             return "Unexpected condition";
         }
@@ -371,4 +376,9 @@ public abstract class BKException extends Exception {
         }
     }
 
+    public static class BKTimeoutException extends BKException {
+        public BKTimeoutException() {
+            super(Code.TimeoutException);
+        }
+    }
 }
