@@ -26,6 +26,7 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.DefaultThreadFactory;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -41,6 +42,7 @@ import org.apache.bookkeeper.conf.ClientConfiguration;
 import org.apache.bookkeeper.meta.CleanupLedgerManager;
 import org.apache.bookkeeper.meta.LedgerManager;
 import org.apache.bookkeeper.meta.LedgerManagerFactory;
+import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.proto.BookieClient;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.stats.NullStatsLogger;
@@ -216,6 +218,8 @@ public class BookKeeper {
 
         ownChannelFactory = true;
         ownZKHandle = true;
+
+        scheduleBookieHealthCheckIfEnabled();
     }
 
     /**
@@ -293,6 +297,8 @@ public class BookKeeper {
 
         ledgerManagerFactory = LedgerManagerFactory.newLedgerManagerFactory(conf, zk);
         ledgerManager = new CleanupLedgerManager(ledgerManagerFactory.newLedgerManager());
+
+        scheduleBookieHealthCheckIfEnabled();
     }
 
     private EnsemblePlacementPolicy initializeEnsemblePlacementPolicy(ClientConfiguration conf)
@@ -314,6 +320,26 @@ public class BookKeeper {
             } else {
                 return rc;
             }
+        }
+    }
+
+    void scheduleBookieHealthCheckIfEnabled() {
+        if (conf.isBookieHealthCheckEnabled()) {
+            scheduler.scheduleAtFixedRate(new Runnable() {
+
+                @Override
+                public void run() {
+                    checkForFaultyBookies();
+                }
+                    }, conf.getBookieHealthCheckIntervalSeconds(), conf.getBookieHealthCheckIntervalSeconds(),
+                    TimeUnit.SECONDS);
+        }
+    }
+
+    void checkForFaultyBookies() {
+        List<BookieSocketAddress> faultyBookies = bookieClient.getFaultyBookies();
+        for (BookieSocketAddress faultyBookie : faultyBookies) {
+            bookieWatcher.quarantineBookie(faultyBookie);
         }
     }
 

@@ -21,8 +21,10 @@ package org.apache.bookkeeper.proto;
 import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.List;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -61,6 +63,7 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.ListMultimap;
+import com.google.common.collect.Sets;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.ExtensionRegistry;
 
@@ -102,6 +105,10 @@ import io.netty.util.concurrent.DefaultThreadFactory;
 public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
 
     static final Logger LOG = LoggerFactory.getLogger(PerChannelBookieClient.class);
+
+    // this set contains the bookie error return codes that we do not consider for a bookie to be "faulty"
+    private static final Set<Integer> expectedBkOperationErrors = Collections.unmodifiableSet(Sets
+            .newHashSet(BKException.Code.BookieHandleNotAvailableException));
 
     public static final int MAX_FRAME_LENGTH = 5 * 1024 * 1024; // increased max netty frame size to 5Mb
     public static final AtomicLong txnIdGenerator = new AtomicLong(0);
@@ -146,19 +153,22 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
     private final ClientAuthProvider.Factory authProviderFactory;
     private final ExtensionRegistry extRegistry;
 
+    private final PerChannelBookieClientPool pcbcPool;
+
     public PerChannelBookieClient(OrderedSafeExecutor executor, EventLoopGroup eventLoopGroup,
                                   BookieSocketAddress addr,
                                   ClientAuthProvider.Factory authProviderFactory,
                                   ExtensionRegistry extRegistry) {
-        this(new ClientConfiguration(), executor, eventLoopGroup, addr,
-             authProviderFactory, extRegistry, NullStatsLogger.INSTANCE);
+        this(new ClientConfiguration(), executor, eventLoopGroup, addr, authProviderFactory, extRegistry,
+                NullStatsLogger.INSTANCE, null);
     }
 
     public PerChannelBookieClient(ClientConfiguration conf, OrderedSafeExecutor executor,
             EventLoopGroup eventLoopGroup, BookieSocketAddress addr,
                                   ClientAuthProvider.Factory authProviderFactory,
                                   ExtensionRegistry extRegistry,
-                                  StatsLogger parentStatsLogger) {
+                                  StatsLogger parentStatsLogger,
+                                  PerChannelBookieClientPool pcbcPool) {
         this.conf = conf;
         this.addr = addr;
         this.executor = executor;
@@ -182,6 +192,8 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         addTimeoutOpLogger = statsLogger.getOpStatsLogger(BookKeeperClientStats.CHANNEL_TIMEOUT_ADD);
         addEntryTimeoutNano = TimeUnit.SECONDS.toNanos(conf.getAddEntryTimeout());
         readEntryTimeoutNano = TimeUnit.SECONDS.toNanos(conf.getReadEntryTimeout());
+
+        this.pcbcPool = pcbcPool;
     }
 
     private void completeOperation(GenericCallback<PerChannelBookieClient> op, int rc) {
@@ -495,7 +507,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         }
 
         final CompletionKey completionKey = completion;
-        ReadCompletion readCompletion = new ReadCompletion(readEntryOpLogger, cb, ctx, ledgerId, entryId);
+        ReadCompletion readCompletion = new ReadCompletion(this, readEntryOpLogger, cb, ctx, ledgerId, entryId);
         CompletionValue existingValue = completionObjects.putIfAbsent(completion, readCompletion);
         if (existingValue != null) {
             // There's a pending read request on same ledger/entry. Use the multimap to track all of them
@@ -565,7 +577,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
 
         final Object readRequest = request;
         final CompletionKey completionKey = completion;
-        ReadCompletion readCompletion = new ReadCompletion(readEntryOpLogger, cb, ctx, ledgerId, entryId);
+        ReadCompletion readCompletion = new ReadCompletion(this, readEntryOpLogger, cb, ctx, ledgerId, entryId);
         CompletionValue existingValue = completionObjects.putIfAbsent(completion, readCompletion);
         if (existingValue != null) {
             // There's a pending read request on same ledger/entry. Use the multimap to track all of them
@@ -631,13 +643,13 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             long elapsedTime = MathUtils.elapsedNanos(value.startTime);
             if (OperationType.ADD_ENTRY == key.operationType) {
                 if (elapsedTime >= addEntryTimeoutNano) {
-                    errorOutAddKey(key);
+                    errorOutAddKey(key, BKException.Code.TimeoutException);
                     addTimeoutOpLogger.registerSuccessfulEvent(elapsedTime, TimeUnit.NANOSECONDS);
                     return true;
                 }
             } else {
                 if (elapsedTime >= readEntryTimeoutNano) {
-                    errorOutReadKey(key);
+                    errorOutReadKey(key, BKException.Code.TimeoutException);
                     readTimeoutOpLogger.registerSuccessfulEvent(elapsedTime, TimeUnit.NANOSECONDS);
                     return true;
                 }
@@ -810,6 +822,12 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             default:
                 break;
             }
+        }
+    }
+
+    void recordError() {
+        if (pcbcPool != null) {
+            pcbcPool.recordError();
         }
     }
 
@@ -1134,34 +1152,47 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
     }
 
     // visible for testing
-    static class ReadCompletion extends CompletionValue {
+    static class ReadCompletion extends CompletionValue implements ReadEntryCallback {
         final ReadEntryCallback cb;
+        final OpStatsLogger readEntryOpLogger;
+        final ReadEntryCallback originalCallback;
+        final Object ctx;
+        final PerChannelBookieClient pcbc;
 
-        public ReadCompletion(ReadEntryCallback cb, Object ctx,
+        public ReadCompletion(final PerChannelBookieClient pcbc, ReadEntryCallback cb, Object ctx,
                               long ledgerId, long entryId) {
-            this(null, cb, ctx, ledgerId, entryId);
+            this(pcbc, null, cb, ctx, ledgerId, entryId);
         }
 
-        public ReadCompletion(final OpStatsLogger readEntryOpLogger,
+        public ReadCompletion(final PerChannelBookieClient pcbc, final OpStatsLogger readEntryOpLogger,
                               final ReadEntryCallback originalCallback,
                 final Object originalCtx, final long ledgerId, final long entryId) {
             super(originalCtx, ledgerId, entryId);
-            this.cb = null == readEntryOpLogger ? originalCallback : new ReadEntryCallback() {
-                @Override
-                public void readEntryComplete(int rc, long ledgerId, long entryId, ByteBuf buffer, Object ctx) {
-                    long latency = MathUtils.elapsedNanos(startTime);
-                    if (rc != BKException.Code.OK) {
-                        readEntryOpLogger.registerFailedEvent(latency, TimeUnit.NANOSECONDS);
-                    } else {
-                        readEntryOpLogger.registerSuccessfulEvent(latency, TimeUnit.NANOSECONDS);
-                    }
+            this.pcbc = pcbc;
+            this.readEntryOpLogger = readEntryOpLogger;
+            this.originalCallback = originalCallback;
+            this.cb = this;
+            this.ctx = originalCtx;
+        }
 
-                    originalCallback.readEntryComplete(rc, ledgerId, entryId, buffer, originalCtx);
+        @Override
+        public void readEntryComplete(int rc, long ledgerId, long entryId, ByteBuf buffer, Object ctx) {
+            long latency = MathUtils.elapsedNanos(startTime);
+            if (readEntryOpLogger != null) {
+                if (rc != BKException.Code.OK) {
+                    readEntryOpLogger.registerFailedEvent(latency, TimeUnit.NANOSECONDS);
+                } else {
+                    readEntryOpLogger.registerSuccessfulEvent(latency, TimeUnit.NANOSECONDS);
                 }
-            };
+            }
+            if (rc != BKException.Code.OK && !expectedBkOperationErrors.contains(rc)) {
+                pcbc.recordError();
+            }
+
+            originalCallback.readEntryComplete(rc, ledgerId, entryId, buffer, ctx);
         }
     }
-    
+
     static class LedgerEntryPair {
         long ledgerId;
         long entryId;
@@ -1184,19 +1215,25 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             addCompletion.pcbc = pcbc;
             addCompletion.startTime = MathUtils.nowInNano();
             addCompletion.originalCallback = originalCallback;
-            addCompletion.cb = null == pcbc.addEntryOpLogger ? originalCallback : addCompletion;
+            addCompletion.cb = addCompletion;
             addCompletion.completionKey = completionKey;
             return addCompletion;
         }
 
         @Override
         public void writeComplete(int rc, long ledgerId, long entryId, BookieSocketAddress addr, Object ctx) {
-            long latency = MathUtils.elapsedNanos(startTime);
-            if (rc != BKException.Code.OK) {
-                pcbc.addEntryOpLogger.registerFailedEvent(latency, TimeUnit.NANOSECONDS);
-            } else {
-                pcbc.addEntryOpLogger.registerSuccessfulEvent(latency, TimeUnit.NANOSECONDS);
+            if (pcbc.addEntryOpLogger != null) {
+                long latency = MathUtils.elapsedNanos(startTime);
+                if (rc != BKException.Code.OK) {
+                    pcbc.addEntryOpLogger.registerFailedEvent(latency, TimeUnit.NANOSECONDS);
+                } else {
+                    pcbc.addEntryOpLogger.registerSuccessfulEvent(latency, TimeUnit.NANOSECONDS);
+                }
             }
+            if (rc != BKException.Code.OK && !expectedBkOperationErrors.contains(rc)) {
+                pcbc.recordError();
+            }
+
             originalCallback.writeComplete(rc, ledgerId, entryId, addr, originalCtx);
         }
 
