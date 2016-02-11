@@ -191,12 +191,8 @@ public class DbLedgerStorageTest {
         // Get last entry from storage
         storage.flush();
 
-        try {
-            storage.getEntry(4, BookieProtocol.LAST_ADD_CONFIRMED);
-            fail("should have failed");
-        } catch (NoEntryException e) {
-            // Ok, ledger 4 was already deleted
-        }
+        res = storage.getEntry(4, BookieProtocol.LAST_ADD_CONFIRMED);
+        assertEquals(entry2, res);
 
         storage.setMasterKey(4, "key".getBytes());
 
@@ -386,6 +382,48 @@ public class DbLedgerStorageTest {
         
         res = storage.getEntry(1, 2);
         assertEquals(entry2, res);
+    }
+
+    @Test
+    public void testAddEntriesAfterDelete() throws Exception {
+        storage.setMasterKey(1, "key".getBytes());
+
+        ByteBuf entry0 = Unpooled.buffer(1024);
+        entry0.writeLong(1); // ledger id
+        entry0.writeLong(0); // entry id
+        entry0.writeBytes("entry-0".getBytes());
+
+        ByteBuf entry1 = Unpooled.buffer(1024);
+        entry1.writeLong(1); // ledger id
+        entry1.writeLong(1); // entry id
+        entry1.writeBytes("entry-1".getBytes());
+
+        storage.addEntry(entry0);
+        storage.addEntry(entry1);
+
+        storage.flush();
+
+        storage.deleteLedger(1);
+
+        storage.setMasterKey(1, "key".getBytes());
+
+        entry0 = Unpooled.buffer(1024);
+        entry0.writeLong(1); // ledger id
+        entry0.writeLong(0); // entry id
+        entry0.writeBytes("entry-0".getBytes());
+
+        entry1 = Unpooled.buffer(1024);
+        entry1.writeLong(1); // ledger id
+        entry1.writeLong(1); // entry id
+        entry1.writeBytes("entry-1".getBytes());
+
+        storage.addEntry(entry0);
+        storage.addEntry(entry1);
+
+        storage.flush();
+
+        assertEquals(entry0, storage.getEntry(1, 0));
+        assertEquals(entry1, storage.getEntry(1, 1));
     }
 
 }
