@@ -19,8 +19,10 @@ package org.apache.bookkeeper.conf;
 
 import java.io.File;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.Beta;
+
 import org.apache.bookkeeper.stats.NullStatsProvider;
 import org.apache.bookkeeper.stats.StatsProvider;
 import org.apache.bookkeeper.util.ReflectionUtils;
@@ -45,6 +47,7 @@ public class ServerConfiguration extends AbstractConfiguration {
 
     // Gc Parameters
     protected final static String GC_WAIT_TIME = "gcWaitTime";
+    protected final static String GC_OVERREPLICATED_LEDGER_WAIT_TIME = "gcOverreplicatedLedgerWaitTime";
     // Sync Parameters
     protected final static String FLUSH_INTERVAL = "flushInterval";
     // Bookie death watch interval
@@ -194,6 +197,33 @@ public class ServerConfiguration extends AbstractConfiguration {
      */
     public ServerConfiguration setGcWaitTime(long gcWaitTime) {
         this.setProperty(GC_WAIT_TIME, Long.toString(gcWaitTime));
+        return this;
+    }
+
+    /**
+     * Get wait time in millis for garbage collection of overreplicated ledgers
+     * 
+     * @return gc wait time
+     */
+    public long getGcOverreplicatedLedgerWaitTimeMillis() {
+        return this.getLong(GC_OVERREPLICATED_LEDGER_WAIT_TIME, TimeUnit.DAYS.toMillis(1));
+    }
+
+    /**
+     * Set wait time for garbage collection of overreplicated ledgers. Default: 1 day
+     * 
+     * A ledger can be overreplicated under the following circumstances:
+     * 1. The ledger with few entries has bk1 and bk2 as its ensemble.
+     * 2. bk1 crashes.
+     * 3. bk3 replicates the ledger from bk2 and updates the ensemble to bk2 and bk3.
+     * 4. bk1 comes back up.
+     * 5. Now there are 3 copies of the ledger.
+     *  
+     * @param gcWaitTime
+     * @return server configuration
+     */
+    public ServerConfiguration setGcOverreplicatedLedgerWaitTime(long gcWaitTime, TimeUnit unit) {
+        this.setProperty(GC_OVERREPLICATED_LEDGER_WAIT_TIME, Long.toString(unit.toMillis(gcWaitTime)));
         return this;
     }
 
