@@ -50,6 +50,7 @@ import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.util.OrderedSafeExecutor;
 import org.apache.bookkeeper.util.ReflectionUtils;
+import org.apache.bookkeeper.util.SafeRunnable;
 import org.apache.bookkeeper.util.ZkUtils;
 import org.apache.bookkeeper.zookeeper.ZooKeeperWatcherBase;
 import org.apache.commons.configuration.ConfigurationException;
@@ -325,10 +326,10 @@ public class BookKeeper {
 
     void scheduleBookieHealthCheckIfEnabled() {
         if (conf.isBookieHealthCheckEnabled()) {
-            scheduler.scheduleAtFixedRate(new Runnable() {
+            scheduler.scheduleAtFixedRate(new SafeRunnable() {
 
                 @Override
-                public void run() {
+                public void safeRun() {
                     checkForFaultyBookies();
                 }
                     }, conf.getBookieHealthCheckIntervalSeconds(), conf.getBookieHealthCheckIntervalSeconds(),
