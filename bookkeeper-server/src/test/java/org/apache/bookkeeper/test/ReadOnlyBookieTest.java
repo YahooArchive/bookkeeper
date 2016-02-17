@@ -20,8 +20,17 @@
  */
 package org.apache.bookkeeper.test;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+
 import java.io.File;
 import java.util.Enumeration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.LedgerDirsManager;
@@ -29,11 +38,12 @@ import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
 import org.apache.bookkeeper.client.LedgerEntry;
 import org.apache.bookkeeper.client.LedgerHandle;
+import org.apache.bookkeeper.client.LedgerHandleAdapter;
 import org.apache.bookkeeper.conf.ServerConfiguration;
-import org.apache.bookkeeper.util.IOUtils;
+import org.apache.bookkeeper.net.BookieSocketAddress;
+import org.apache.bookkeeper.proto.BookieProtocol;
+import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.WriteCallback;
 import org.junit.Test;
-
-import static org.junit.Assert.*;
 
 /**
  * Test to verify the readonly feature of bookies
@@ -90,6 +100,36 @@ public class ReadOnlyBookieTest extends BookKeeperClusterTestCase {
             assertEquals("Entry should contain correct data", "data",
                     new String(entry.getEntry()));
         }
+    }
+
+    @Test(timeout = 60000)
+    public void testBookieExceptionOnReadOnlyBookie() throws Exception {
+        killBookie(0);
+        baseConf.setReadOnlyModeEnabled(true);
+        startNewBookie();
+        LedgerHandle ledger = bkc.createLedger(2, 2, DigestType.MAC, "".getBytes());
+
+        for (int i = 0; i < 10; i++) {
+            ledger.addEntry("data".getBytes());
+        }
+
+        Bookie bookie = bs.get(1).getBookie();
+        bookie.transitionToReadOnlyMode();
+
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicInteger result = new AtomicInteger();
+        ByteBuf data = Unpooled.wrappedBuffer("msg".getBytes());
+        bkc.getBkClient().addEntry(getBookie(1), ledger.getId(), ledger.getLedgerKey(), 10,
+                LedgerHandleAdapter.toSend(ledger, 10, data), new WriteCallback() {
+
+                    @Override
+                    public void writeComplete(int rc, long ledgerId, long entryId, BookieSocketAddress addr, Object ctx) {
+                        result.set(rc);
+                        latch.countDown();
+                    }
+                }, null, BookieProtocol.FLAG_NONE);
+        latch.await();
+        assertEquals(BKException.Code.WriteOnReadOnlyBookieException, result.get());
     }
 
     @Test(timeout = 60000)

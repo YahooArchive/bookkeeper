@@ -19,6 +19,8 @@
  */
 package org.apache.bookkeeper.client;
 
+import io.netty.buffer.ByteBuf;
+
 /**
  * Adapter for tests to get the public access from LedgerHandle for its default
  * scope
@@ -28,5 +30,10 @@ public class LedgerHandleAdapter {
     /** get the ledger handle */
     public static LedgerMetadata getLedgerMetadata(LedgerHandle lh) {
         return lh.getLedgerMetadata();
+    }
+
+    public static ByteBuf toSend(LedgerHandle lh, long entryId, ByteBuf data) {
+        return lh.getDigestManager().computeDigestAndPackageForSending(entryId, lh.getLastAddConfirmed(),
+                lh.addToLength(data.readableBytes()), data);
     }
 }

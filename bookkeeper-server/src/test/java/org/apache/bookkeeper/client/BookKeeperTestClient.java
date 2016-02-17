@@ -24,6 +24,7 @@ package org.apache.bookkeeper.client;
 import java.io.IOException;
 
 import org.apache.bookkeeper.conf.ClientConfiguration;
+import org.apache.bookkeeper.proto.BookieClient;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooKeeper;
 
@@ -54,5 +55,9 @@ public class BookKeeperTestClient extends BookKeeper {
     public void readBookiesBlocking()
             throws InterruptedException, KeeperException {
         bookieWatcher.readBookiesBlocking();
+    }
+
+    public BookieClient getBkClient() {
+        return getBookieClient();
     }
 }
