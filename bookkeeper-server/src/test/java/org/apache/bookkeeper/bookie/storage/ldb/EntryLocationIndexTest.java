@@ -139,4 +139,41 @@ public class EntryLocationIndexTest {
 
         idx.close();
     }
+
+    // this tests if a ledger is added after it has been deleted
+    @Test
+    public void addLedgerAfterDeleteTest() throws Exception {
+        File tmpDir = File.createTempFile("bkTest", ".dir");
+        tmpDir.delete();
+        tmpDir.mkdir();
+        tmpDir.deleteOnExit();
+
+        EntryLocationIndex idx = new EntryLocationIndex(storageFactory, tmpDir.getAbsolutePath(),
+                NullStatsLogger.INSTANCE, 1 * 1024);
+
+        Multimap<Long, LongPair> locations = ArrayListMultimap.create();
+
+        // Add some dummy indexes
+        locations.put(40312l, new LongPair(0, 1));
+        locations.put(40313l, new LongPair(10, 2));
+        locations.put(40320l, new LongPair(0, 3));
+        idx.addLocations(locations);
+
+        locations.clear();
+        idx.delete(40313);
+
+        // Add more indexes in a different batch
+        locations.put(40313l, new LongPair(11, 5));
+        locations.put(40313l, new LongPair(12, 6));
+        locations.put(40320l, new LongPair(1, 7));
+        locations.put(40312l, new LongPair(3, 4));
+        idx.addLocations(locations);
+
+        idx.flush();
+
+        assertEquals(5, idx.getLocation(40313, 11));
+        assertEquals(6, idx.getLocation(40313, 12));
+
+        idx.close();
+    }
 }

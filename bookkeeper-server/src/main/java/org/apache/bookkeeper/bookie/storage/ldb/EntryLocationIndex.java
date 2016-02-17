@@ -222,6 +222,10 @@ public class EntryLocationIndex implements Closeable {
         // For each ledger with new entries in the write cache, we write a single record, containing all the
         // offsets for all its own entries
         for (long ledgerId : locationMap.keySet()) {
+
+            // if there is any pending delete for this ledger, we need to remove it
+            deletedLedgers.remove(ledgerId);
+
             final long lastEntryId = getLastEntryInLedger(ledgerId);
 
             List<LongPair> entries = (List<LongPair>) locationMap.get(ledgerId);

@@ -118,6 +118,7 @@ public class LedgerMetadataIndex implements Closeable {
         }
 
         pendingLedgersUpdates.add(new SimpleEntry<Long, LedgerData>(ledgerId, ledgerData));
+        pendingDeletedLedgers.remove(ledgerId);
     }
 
     public void delete(long ledgerId) throws IOException {
@@ -129,6 +130,7 @@ public class LedgerMetadataIndex implements Closeable {
         }
 
         pendingDeletedLedgers.add(ledgerId);
+        pendingLedgersUpdates.remove(ledgerId);
     }
 
     public Iterable<Long> getActiveLedgersInRange(final long firstLedgerId, final long lastLedgerId)
@@ -171,6 +173,7 @@ public class LedgerMetadataIndex implements Closeable {
         }
 
         pendingLedgersUpdates.add(new SimpleEntry<Long, LedgerData>(ledgerId, newLedgerData));
+        pendingDeletedLedgers.remove(ledgerId);
         return true;
     }
 
@@ -202,6 +205,7 @@ public class LedgerMetadataIndex implements Closeable {
         }
 
         pendingLedgersUpdates.add(new SimpleEntry<Long, LedgerData>(ledgerId, ledgerData));
+        pendingDeletedLedgers.remove(ledgerId);
     }
 
     /**
