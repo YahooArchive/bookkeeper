@@ -163,7 +163,11 @@ public class ReplicationWorker implements Runnable {
                 return;
             } catch (BKException e) {
                 LOG.error("BKException while replicating fragments", e);
-                waitBackOffTime();
+                if (e instanceof BKException.BKWriteOnReadOnlyBookieException) {
+                    waitTillTargetBookieIsWritable();
+                } else {
+                    waitBackOffTime();
+                }
             } catch (UnavailableException e) {
                 LOG.error("UnavailableException "
                         + "while replicating fragments", e);
@@ -178,6 +182,14 @@ public class ReplicationWorker implements Runnable {
             Thread.sleep(5000);
         } catch (InterruptedException e) {
         }
+    }
+
+    private void waitTillTargetBookieIsWritable() {
+        LOG.info("Waiting for target bookie {} to be back in read/write mode", targetBookie);
+        while (admin.getReadOnlyBookies().contains(targetBookie)) {
+            waitBackOffTime();
+        }
+        LOG.info("Target bookie {} is back in read/write mode", targetBookie);
     }
 
     /**
@@ -261,6 +273,7 @@ public class ReplicationWorker implements Runnable {
                 LOG.warn("BKLedgerRecoveryException "
                         + "while replicating the fragment", e);
                 if (admin.getReadOnlyBookies().contains(targetBookie)) {
+                    underreplicationManager.releaseUnderreplicatedLedger(ledgerIdToReplicate);
                     throw new BKException.BKWriteOnReadOnlyBookieException();
                 }
             }

@@ -57,6 +57,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
     private static final Logger LOG = LoggerFactory
             .getLogger(TestReplicationWorker.class);
     private String basePath = "";
+    private String baseLockPath = "";
     private LedgerManagerFactory mFactory;
     private LedgerUnderreplicationManager underReplicationManager;
     private static byte[] data = "TestReplicationWorker".getBytes();
@@ -71,6 +72,9 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
         basePath = baseClientConf.getZkLedgersRootPath() + '/'
                 + BookKeeperConstants.UNDER_REPLICATION_NODE
                 + BookKeeperConstants.DEFAULT_ZK_LEDGERS_ROOT_PATH;
+        baseLockPath = baseClientConf.getZkLedgersRootPath() + '/'
+                + BookKeeperConstants.UNDER_REPLICATION_NODE
+                + "/locks";
         baseConf.setRereplicationEntryBatchSize(3);
     }
 
@@ -569,6 +573,55 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
             assertFalse("Replication worker should have shut down", rw.isRunning());
         } finally {
             zk.close();
+        }
+    }
+    
+    @Test(timeout = 30000)
+    public void testRWOnTransitionOfReadOnlyBookieToReadWrite() throws Exception {
+        LedgerHandle lh = bkc.createLedger(3, 3, BookKeeper.DigestType.CRC32, TESTPASSWD);
+
+        for (int i = 0; i < 10; i++) {
+            lh.addEntry(data);
+        }
+        BookieSocketAddress replicaToKill =
+                LedgerHandleAdapter.getLedgerMetadata(lh).getEnsembles().get(0L).get(0);
+
+        LOG.info("Killing Bookie", replicaToKill);
+        killBookie(replicaToKill);
+
+        int newBkPort = startNewBookie();
+        for (int i = 0; i < 10; i++) {
+            lh.addEntry(data);
+        }
+
+        BookieSocketAddress newBkAddr = new BookieSocketAddress(InetAddress.getLocalHost().getHostAddress(), newBkPort);
+        LOG.info("New Bookie addr :" + newBkAddr);
+
+        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf, newBkAddr);
+
+        rw.start();
+        try {
+            BookieServer newBk = bs.get(bs.size() - 1);
+            bsConfs.get(bsConfs.size() - 1).setReadOnlyModeEnabled(true);
+            newBk.getBookie().transitionToReadOnlyMode();
+            underReplicationManager.markLedgerUnderreplicated(lh.getId(), replicaToKill.toString());
+            while (zkc.exists(String.format("%s/urL%010d", baseLockPath, lh.getId()), false) != null) {
+                Thread.sleep(100);
+            }
+            Thread.sleep(1000);
+            assertTrue(ReplicationTestUtil.isLedgerInUnderReplication(zkc, lh.getId(), basePath));
+            bsConfs.get(bsConfs.size() - 1).setReadOnlyModeEnabled(false);
+            newBk.getBookie().transitionToWritableMode();
+            while (ReplicationTestUtil.isLedgerInUnderReplication(zkc, lh.getId(), basePath)) {
+                Thread.sleep(100);
+            }
+            
+            killAllBookies(lh, newBkAddr);
+
+            // Should be able to read the entries from 0-9
+            verifyRecoveredLedgers(lh, 0, 9);
+        } finally {
+            rw.shutdown();
         }
     }
 
