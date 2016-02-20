@@ -625,10 +625,12 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
                 ++timedoutOperations;
             }
         }
-        for (CompletionKey key : completionObjectsV2Conflicts.keys()) {
-            for (CompletionValue value : completionObjectsV2Conflicts.get(key)) {
-                if (checkAndFailOperation(key, value)) {
-                    ++timedoutOperations;
+        synchronized (this) {
+            for (CompletionKey key : completionObjectsV2Conflicts.keys()) {
+                for (CompletionValue value : completionObjectsV2Conflicts.get(key)) {
+                    if (checkAndFailOperation(key, value)) {
+                        ++timedoutOperations;
+                    }
                 }
             }
         }
