@@ -351,10 +351,6 @@ public class GcLedgersTest extends LedgerManagerTestCase {
         }
 
         @Override
-        public void forceIndexCompaction() throws IOException {
-        }
-
-        @Override
         public Checkpoint checkpoint(Checkpoint checkpoint) throws IOException {
             return null;
         }

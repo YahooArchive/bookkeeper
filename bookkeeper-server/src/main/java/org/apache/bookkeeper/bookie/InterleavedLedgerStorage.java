@@ -258,7 +258,7 @@ public class InterleavedLedgerStorage implements CompactableLedgerStorage, Entry
             }
         }
     }
-    
+
     @Override
     public void trimEntries(long ledgerId, long lastEntryId) throws IOException {
         // Ignore trimming request
@@ -359,10 +359,6 @@ public class InterleavedLedgerStorage implements CompactableLedgerStorage, Entry
     @Override
     public EntryLogger getEntryLogger() {
         return entryLogger;
-    }
-
-    @Override
-    public void forceIndexCompaction() throws IOException {
     }
 
     @Override
