@@ -10,7 +10,7 @@ public interface KeyValueStorage extends Closeable {
 
     /**
      * Get the value associated with the given key
-     * 
+     *
      * @param key
      *            the key to lookup
      * @return the value or null if the key was not found
@@ -21,7 +21,7 @@ public interface KeyValueStorage extends Closeable {
      * Get the entry whose key is the biggest and it's lesser than the supplied key.
      * <p>
      * For example if the db contains :
-     * 
+     *
      * <pre>
      * {
      *      1 : 'a',
@@ -29,13 +29,13 @@ public interface KeyValueStorage extends Closeable {
      *      3 : 'c'
      * }
      * </pre>
-     * 
+     *
      * Then:
-     * 
+     *
      * <pre>
      * getFloor(3) --> (2, 'b')
      * </pre>
-     * 
+     *
      * @param key
      *            the non-inclusive upper limit key
      * @return the entry before or null if there's no entry before key
@@ -43,7 +43,7 @@ public interface KeyValueStorage extends Closeable {
     Entry<byte[], byte[]> getFloor(byte[] key) throws IOException;
 
     /**
-     * 
+     *
      * @param key
      * @throws IOException
      */
@@ -51,19 +51,19 @@ public interface KeyValueStorage extends Closeable {
 
     /**
      * Get an iterator over to scan sequentially through all the keys in the database
-     * 
+     *
      * @return
      */
     CloseableIterator<byte[]> keys();
 
     /**
      * Get an iterator over to scan sequentially through all the keys within a specified range.
-     * 
+     *
      * @param firstKey
      *            the first key in the range (included)
      * @param lastKey
      *            the lastKey in the range (not included)
-     * 
+     *
      */
     CloseableIterator<byte[]> keys(byte[] firstKey, byte[] lastKey);
 
@@ -82,8 +82,6 @@ public interface KeyValueStorage extends Closeable {
 
         public T next() throws IOException;
     }
-
-    void forceCompaction() throws IOException;
 
     Batch newBatch();
 

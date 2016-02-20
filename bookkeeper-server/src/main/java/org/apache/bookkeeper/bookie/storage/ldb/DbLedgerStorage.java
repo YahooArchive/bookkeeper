@@ -573,7 +573,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
         long flushTime = MathUtils.elapsedNanos(startTime);
         double flushThroughput = sizeToFlush / 1024 / 1024 / flushTime / 1e9;
-        
+
         if (log.isDebugEnabled()) {
             log.debug("Flushing done time {} s -- Written {} Mb/s", flushTime / 1e9, flushThroughput);
         }
@@ -650,12 +650,6 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         }
 
         entryLocationIndex.updateLocations(locations);
-    }
-
-    @Override
-    public void forceIndexCompaction() throws IOException {
-        ledgerIndex.forceCompaction();
-        entryLocationIndex.forceCompaction();
     }
 
     // No mbeans to expose
