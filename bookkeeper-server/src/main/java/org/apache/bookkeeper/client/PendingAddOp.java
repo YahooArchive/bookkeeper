@@ -68,6 +68,7 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
     OpStatsLogger addOpLogger;
     long currentLedgerLength;
     int pendingWriteRequests;
+    boolean callbackTriggered;
 
     static PendingAddOp create(LedgerHandle lh, ByteBuf payload, AddCallback cb, Object ctx) {
         PendingAddOp op = RECYCLER.get();
@@ -82,6 +83,7 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
         op.ackSet = lh.distributionSchedule.getAckSet();
         op.addOpLogger = lh.bk.getAddOpLogger();
         op.pendingWriteRequests = 0;
+        op.callbackTriggered = false;
         return op;
     }
 
@@ -167,7 +169,7 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
         writeSet.forEach(this);
     }
 
-    /** Called when iterating over writeSet. Trick to avoid creating 
+    /** Called when iterating over writeSet. Trick to avoid creating
      * an iterator over the set
      */
     @Override
@@ -183,7 +185,8 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
         if (completed) {
             // I am already finished, ignore incoming responses.
             // otherwise, we might hit the following error handling logic, which might cause bad things.
-            if (pendingWriteRequests == 0) {
+            if (callbackTriggered && pendingWriteRequests == 0) {
+                // We can recycle this object only when no other request is expected to complete
                 recycle();
             }
             return;
@@ -246,6 +249,7 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
             addOpLogger.registerSuccessfulEvent(latencyNanos, TimeUnit.NANOSECONDS);
         }
         cb.addComplete(rc, lh, entryId, ctx);
+        callbackTriggered = true;
 
         if (pendingWriteRequests == 0) {
             recycle();
@@ -282,6 +286,9 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
         lh = null;
         isRecoveryAdd = false;
         addOpLogger = null;
+        completed = false;
+        pendingWriteRequests = 0;
+        callbackTriggered = false;
         RECYCLER.recycle(this, recyclerHandle);
     }
 }
