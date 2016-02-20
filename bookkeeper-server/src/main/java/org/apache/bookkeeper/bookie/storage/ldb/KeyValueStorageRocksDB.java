@@ -5,7 +5,6 @@ import static com.google.common.base.Preconditions.checkArgument;
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.Map.Entry;
-import java.util.concurrent.TimeUnit;
 
 import org.rocksdb.CompressionType;
 import org.rocksdb.FlushOptions;
@@ -16,8 +15,6 @@ import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
 import org.rocksdb.WriteBatch;
 import org.rocksdb.WriteOptions;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import com.google.common.primitives.UnsignedBytes;
 
@@ -30,7 +27,6 @@ public class KeyValueStorageRocksDB implements KeyValueStorage {
         }
     };
 
-    private final String path;
     private final RocksDB db;
 
     private final WriteOptions DontSync;
@@ -41,7 +37,6 @@ public class KeyValueStorageRocksDB implements KeyValueStorage {
     private final FlushOptions FlushAndWait;
 
     public KeyValueStorageRocksDB(String path) throws IOException {
-        this.path = path;
         try {
             RocksDB.loadLibrary();
         } catch (Throwable t) {
@@ -230,21 +225,6 @@ public class KeyValueStorageRocksDB implements KeyValueStorage {
     }
 
     @Override
-    public void forceCompaction() throws IOException {
-        log.info("Forcing compaction on levelDB database at {}", path);
-        long start = System.nanoTime();
-
-        try {
-            db.compactRange();
-
-            long nanosElapsed = System.nanoTime() - start;
-            log.info("Compaction done ({} ms)", TimeUnit.NANOSECONDS.toMicros(nanosElapsed) / 1000.0);
-        } catch (RocksDBException e) {
-            throw new IOException("Error in RocksDB compact range", e);
-        }
-    }
-
-    @Override
     public Batch newBatch() {
         return new RocksDBBatch();
     }
@@ -292,6 +272,4 @@ public class KeyValueStorageRocksDB implements KeyValueStorage {
     }
 
     private final static Comparator<byte[]> ByteComparator = UnsignedBytes.lexicographicalComparator();
-
-    private static final Logger log = LoggerFactory.getLogger(KeyValueStorageRocksDB.class);
 }

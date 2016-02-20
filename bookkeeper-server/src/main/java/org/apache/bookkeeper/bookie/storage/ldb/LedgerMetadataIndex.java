@@ -30,7 +30,7 @@ import com.google.protobuf.ByteString;
 
 /**
  * Maintains an index for the ledgers metadata.
- * 
+ *
  * The key is the ledgerId and the value is the {@link LedgerData} content.
  */
 public class LedgerMetadataIndex implements Closeable {
@@ -238,10 +238,6 @@ public class LedgerMetadataIndex implements Closeable {
         }
 
         batch.flush();
-    }
-
-    void forceCompaction() throws IOException {
-        ledgersDb.forceCompaction();
     }
 
     private static final Logger log = LoggerFactory.getLogger(LedgerMetadataIndex.class);

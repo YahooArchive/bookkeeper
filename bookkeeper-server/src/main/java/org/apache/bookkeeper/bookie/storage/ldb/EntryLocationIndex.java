@@ -369,9 +369,5 @@ public class EntryLocationIndex implements Closeable {
         }
     }
 
-    void forceCompaction() throws IOException{
-       locationsDb.forceCompaction();
-    }
-
     private static final Logger log = LoggerFactory.getLogger(EntryLocationIndex.class);
 }
