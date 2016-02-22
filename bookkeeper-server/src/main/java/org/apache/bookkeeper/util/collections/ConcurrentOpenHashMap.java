@@ -27,13 +27,14 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.locks.StampedLock;
 import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 
 import com.google.common.collect.Lists;
 
 /**
  * Concurrent hash map
- * 
+ *
  * Provides similar methods as a ConcurrentMap<K,V> but since it's an open hash map with linear probing, no node
  * allocations are required to store the values
  *
@@ -161,6 +162,17 @@ public class ConcurrentOpenHashMap<K, V> {
         for (Section<K, V> s : sections) {
             s.forEach(processor);
         }
+    }
+
+    public int removeIf(BiPredicate<K, V> filter) {
+        checkNotNull(filter);
+
+        int removedCount = 0;
+        for (Section<K,V> s : sections) {
+            removedCount += s.removeIf(filter);
+        }
+
+        return removedCount;
     }
 
     /**
@@ -314,17 +326,7 @@ public class ConcurrentOpenHashMap<K, V> {
                     if (key.equals(storedKey)) {
                         if (value == null || value.equals(storedValue)) {
                             --size;
-
-                            int nextInArray = (bucket + 2) & (table.length - 1);
-                            if (table[nextInArray] == EmptyKey) {
-                                table[bucket] = EmptyKey;
-                                table[bucket + 1] = null;
-                                --usedBuckets;
-                            } else {
-                                table[bucket] = DeletedKey;
-                                table[bucket + 1] = null;
-                            }
-
+                            cleanBucket(bucket);
                             return storedValue;
                         } else {
                             return null;
@@ -392,6 +394,44 @@ public class ConcurrentOpenHashMap<K, V> {
                 if (acquiredReadLock) {
                     unlockRead(stamp);
                 }
+            }
+        }
+
+        int removeIf(BiPredicate<K, V> filter) {
+            long stamp = writeLock();
+
+            int removedCount = 0;
+            try {
+                // Go through all the buckets for this section
+                for (int bucket = 0; bucket < table.length; bucket += 2) {
+                    K storedKey = (K) table[bucket];
+                    V storedValue = (V) table[bucket + 1];
+
+                    if (storedKey != DeletedKey && storedKey != EmptyKey) {
+                        if (filter.test(storedKey, storedValue)) {
+                            // Removing item
+                            --size;
+                            ++removedCount;
+                            cleanBucket(bucket);
+                        }
+                    }
+                }
+
+                return removedCount;
+            } finally {
+                unlockWrite(stamp);
+            }
+        }
+
+        private final void cleanBucket(int bucket) {
+            int nextInArray = (bucket + 2) & (table.length - 1);
+            if (table[nextInArray] == EmptyKey) {
+                table[bucket] = EmptyKey;
+                table[bucket + 1] = null;
+                --usedBuckets;
+            } else {
+                table[bucket] = DeletedKey;
+                table[bucket + 1] = null;
             }
         }
 
