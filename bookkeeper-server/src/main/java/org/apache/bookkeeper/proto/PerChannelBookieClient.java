@@ -108,7 +108,12 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
 
     // this set contains the bookie error return codes that we do not consider for a bookie to be "faulty"
     private static final Set<Integer> expectedBkOperationErrors = Collections.unmodifiableSet(Sets
-            .newHashSet(BKException.Code.BookieHandleNotAvailableException));
+            .newHashSet(BKException.Code.BookieHandleNotAvailableException,
+                        BKException.Code.NoSuchEntryException,
+                        BKException.Code.NoSuchLedgerExistsException,
+                        BKException.Code.LedgerFencedException,
+                        BKException.Code.EntryTrimmedException,
+                        BKException.Code.WriteOnReadOnlyBookieException));
 
     public static final int MAX_FRAME_LENGTH = 5 * 1024 * 1024; // increased max netty frame size to 5Mb
     public static final AtomicLong txnIdGenerator = new AtomicLong(0);

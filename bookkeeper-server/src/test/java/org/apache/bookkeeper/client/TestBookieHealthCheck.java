@@ -101,4 +101,29 @@ public class TestBookieHealthCheck extends BookKeeperClusterTestCase {
         Assert.assertFalse(bkc.bookieWatcher.quarantinedBookies.asMap().containsKey(bookieToRestart));
     }
 
+    @Test
+    public void testNoQuarantineOnExpectedBkErrors() throws Exception {
+        final LedgerHandle lh = bkc.createLedger(2, 2, 2, BookKeeper.DigestType.CRC32, new byte[] {});
+        final int numEntries = 10;
+        for (int i = 0; i < numEntries; i++) {
+            byte[] msg = ("msg-" + i).getBytes();
+            lh.addEntry(msg);
+        }
+        BookieSocketAddress bookie1 = lh.getLedgerMetadata().getEnsemble(0).get(0);
+        BookieSocketAddress bookie2 = lh.getLedgerMetadata().getEnsemble(0).get(1);
+        try {
+            // we read an entry that is not added
+            lh.readEntries(10, 10);
+        } catch (BKException e) {
+            // ok
+        }
+
+        // make sure the health check runs once
+        Thread.sleep(baseClientConf.getBookieHealthCheckIntervalSeconds() * 2 * 1000);
+
+        // the bookie watcher should not contain the bookieToRestart in the quarantine set
+        Assert.assertFalse(bkc.bookieWatcher.quarantinedBookies.asMap().containsKey(bookie1));
+        Assert.assertFalse(bkc.bookieWatcher.quarantinedBookies.asMap().containsKey(bookie2));
+    }
+
 }
