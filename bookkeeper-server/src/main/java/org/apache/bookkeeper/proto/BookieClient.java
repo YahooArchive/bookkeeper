@@ -424,7 +424,7 @@ public class BookieClient implements PerChannelBookieClientFactory {
                     @Override
                     public void operationComplete(int rc, PerChannelBookieClient result) {
                         if (rc == BKException.Code.OK) {
-                            result.monitorPendingOperations();
+                            result.verifyTimeoutOnPendingOperations();
                         } else {
                             LOG.warn("Unable to get channel", BKException.create(rc));
                         }

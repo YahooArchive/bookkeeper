@@ -22,14 +22,13 @@ import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayDeque;
 import java.util.Collections;
-import java.util.List;
+import java.util.Iterator;
 import java.util.Queue;
 import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.BiPredicate;
 
 import org.apache.bookkeeper.auth.ClientAuthProvider;
 import org.apache.bookkeeper.client.BKException;
@@ -89,12 +88,8 @@ import io.netty.handler.codec.CorruptedFrameException;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
 import io.netty.handler.codec.TooLongFrameException;
-import io.netty.util.HashedWheelTimer;
 import io.netty.util.Recycler;
 import io.netty.util.Recycler.Handle;
-import io.netty.util.Timeout;
-import io.netty.util.TimerTask;
-import io.netty.util.concurrent.DefaultThreadFactory;
 
 /**
  * This class manages all details of connection to a particular bookie. It also
@@ -121,8 +116,8 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
     final BookieSocketAddress addr;
     final EventLoopGroup eventLoopGroup;
     final OrderedSafeExecutor executor;
-    final long addEntryTimeoutNano;
-    final long readEntryTimeoutNano;
+    final long addEntryTimeoutNanos;
+    final long readEntryTimeoutNanos;
 
     private final ConcurrentOpenHashMap<CompletionKey, CompletionValue> completionObjects = new ConcurrentOpenHashMap<CompletionKey, CompletionValue>();
 
@@ -136,7 +131,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
     private final OpStatsLogger readTimeoutOpLogger;
     private final OpStatsLogger addEntryOpLogger;
     private final OpStatsLogger addTimeoutOpLogger;
-    
+
     private final boolean useV2WireProtocol;
 
     /**
@@ -195,8 +190,8 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         addEntryOpLogger = statsLogger.getOpStatsLogger(BookKeeperClientStats.CHANNEL_ADD_OP);
         readTimeoutOpLogger = statsLogger.getOpStatsLogger(BookKeeperClientStats.CHANNEL_TIMEOUT_READ);
         addTimeoutOpLogger = statsLogger.getOpStatsLogger(BookKeeperClientStats.CHANNEL_TIMEOUT_ADD);
-        addEntryTimeoutNano = TimeUnit.SECONDS.toNanos(conf.getAddEntryTimeout());
-        readEntryTimeoutNano = TimeUnit.SECONDS.toNanos(conf.getReadEntryTimeout());
+        addEntryTimeoutNanos = TimeUnit.SECONDS.toNanos(conf.getAddEntryTimeout());
+        readEntryTimeoutNanos = TimeUnit.SECONDS.toNanos(conf.getReadEntryTimeout());
 
         this.pcbcPool = pcbcPool;
     }
@@ -446,7 +441,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
      */
     void trim(final long ledgerId, byte[] masterKey, final long lastEntryId, final int options) {
         Object request = null;
-        
+
         if (useV2WireProtocol) {
             request = new BookieProtocol.TrimRequest(BookieProtocol.CURRENT_PROTOCOL_VERSION, ledgerId, lastEntryId);
         } else {
@@ -526,7 +521,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             errorOutReadKey(completionKey);
             return;
         }
-        
+
         final Object readRequest = request;
 
         try {
@@ -622,46 +617,80 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         }
     }
 
-    public void monitorPendingOperations() {
-        int timedoutOperations = 0;
-        for (CompletionKey key : completionObjects.keys()) {
-            CompletionValue value = completionObjects.get(key);
-            if (checkAndFailOperation(key, value)) {
-                ++timedoutOperations;
+    public void verifyTimeoutOnPendingOperations() {
+        int timedOutOperations = completionObjects.removeIf(new BiPredicate<CompletionKey, CompletionValue>() {
+            @Override
+            public boolean test(CompletionKey key, CompletionValue value) {
+                // Return true if the operation was expired, so that the operation is removed from map,
+                // and trigger error callback
+                return verifyOperationTimeout(key.operationType, value);
             }
-        }
+        });
+
         synchronized (this) {
-            for (CompletionKey key : completionObjectsV2Conflicts.keys()) {
-                for (CompletionValue value : completionObjectsV2Conflicts.get(key)) {
-                    if (checkAndFailOperation(key, value)) {
-                        ++timedoutOperations;
-                    }
+            Iterator<CompletionValue> iterator = completionObjectsV2Conflicts.values().iterator();
+            while (iterator.hasNext()) {
+                CompletionValue value = iterator.next();
+                if (verifyOperationTimeout(OperationType.READ_ENTRY, value)) {
+                    ++timedOutOperations;
+                    iterator.remove();
                 }
             }
         }
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Successfully timed-out {} operations to channel {} for {}", new Object[] { timedoutOperations,
-                    channel, addr });
+
+        if (timedOutOperations > 0) {
+            LOG.info("Timed-out {} operations to channel {} for {}",
+                    new Object[] { timedOutOperations, channel, addr });
         }
     }
 
-    private boolean checkAndFailOperation(CompletionKey key, CompletionValue value) {
-        if (value != null) {
-            long elapsedTime = MathUtils.elapsedNanos(value.startTime);
-            if (OperationType.ADD_ENTRY == key.operationType) {
-                if (elapsedTime >= addEntryTimeoutNano) {
-                    errorOutAddKey(key, BKException.Code.TimeoutException);
-                    addTimeoutOpLogger.registerSuccessfulEvent(elapsedTime, TimeUnit.NANOSECONDS);
-                    return true;
-                }
-            } else {
-                if (elapsedTime >= readEntryTimeoutNano) {
-                    errorOutReadKey(key, BKException.Code.TimeoutException);
-                    readTimeoutOpLogger.registerSuccessfulEvent(elapsedTime, TimeUnit.NANOSECONDS);
-                    return true;
-                }
+    private boolean verifyOperationTimeout(OperationType operationType, CompletionValue value) {
+        if (value == null) {
+            return false;
+        }
+
+        long elapsedTimeNanos = MathUtils.elapsedNanos(value.startTime);
+
+        if (operationType == OperationType.ADD_ENTRY) {
+            if (addEntryTimeoutNanos > 0 && elapsedTimeNanos >= addEntryTimeoutNanos) {
+                executor.submitOrdered(value.ledgerId, new SafeRunnable() {
+                    @Override
+                    public void safeRun() {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("Timing out request for adding entry: {} ledger-id: {}",
+                                    new Object[] { value.entryId, value.ledgerId });
+                        }
+
+                        AddCompletion addCompletion = (AddCompletion) value;
+                        addCompletion.cb.writeComplete(BKException.Code.TimeoutException, value.ledgerId, value.entryId,
+                                addr, value.ctx);
+                        addCompletion.recycle();
+                    }
+                });
+
+                addTimeoutOpLogger.registerSuccessfulEvent(elapsedTimeNanos, TimeUnit.NANOSECONDS);
+                return true;
+            }
+        } else {
+            if (readEntryTimeoutNanos > 0 && elapsedTimeNanos >= readEntryTimeoutNanos) {
+                executor.submitOrdered(value.ledgerId, new SafeRunnable() {
+                    @Override
+                    public void safeRun() {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("Timing out request for reading entry: {} ledger-id: {}",
+                                    new Object[] { value.entryId, value.ledgerId });
+                        }
+
+                        ReadCompletion readCompletion = (ReadCompletion) value;
+                        readCompletion.cb.readEntryComplete(BKException.Code.TimeoutException, readCompletion.ledgerId,
+                                readCompletion.entryId, null, readCompletion.ctx);
+                    }
+                });
+                readTimeoutOpLogger.registerSuccessfulEvent(elapsedTimeNanos, TimeUnit.NANOSECONDS);
+                return true;
             }
         }
+
         return false;
     }
 
@@ -925,7 +954,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
     private void readV2Response(final BookieProtocol.Response response) {
         OperationType operationType = getOperationType(response.getOpCode());
         StatusCode status = getStatusCodeFromErrorCode(response.errorCode);
-        
+
         V2CompletionKey key = V2CompletionKey.get(this, response.ledgerId, response.entryId, operationType);
         CompletionValue completionValue = completionObjects.remove(key);
         if (completionValue == null) {
@@ -948,7 +977,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             }
         } else {
             long orderingKey = completionValue.ledgerId;
-            
+
             executor.submitOrdered(orderingKey,
                     ReadV2ResponseCallback.create(this, status, operationType, response.ledgerId, response.entryId, completionValue, response));
         }
@@ -1024,7 +1053,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             }
         };
     }
-    
+
     private static OperationType getOperationType(byte opCode) {
         switch (opCode) {
         case BookieProtocol.ADDENTRY:
@@ -1054,7 +1083,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             }
         } else {
             long orderingKey = completionValue.ledgerId;
-            
+
             executor.submitOrdered(orderingKey, new SafeRunnable() {
                 @Override
                 public void safeRun() {
