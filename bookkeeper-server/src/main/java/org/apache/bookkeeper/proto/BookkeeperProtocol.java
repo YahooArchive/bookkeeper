@@ -91,7 +91,8 @@ public final class BookkeeperProtocol {
     EBADVERSION(6, 503),
     EFENCED(7, 504),
     EREADONLY(8, 505),
-    ETRIMMED(9, 550),
+    ETOOMANYREQUESTS(9, 506),
+    ETRIMMED(10, 550),
     ;
     
     public static final int EOK_VALUE = 0;
@@ -103,6 +104,7 @@ public final class BookkeeperProtocol {
     public static final int EBADVERSION_VALUE = 503;
     public static final int EFENCED_VALUE = 504;
     public static final int EREADONLY_VALUE = 505;
+    public static final int ETOOMANYREQUESTS_VALUE = 506;
     public static final int ETRIMMED_VALUE = 550;
     
     
@@ -119,6 +121,7 @@ public final class BookkeeperProtocol {
         case 503: return EBADVERSION;
         case 504: return EFENCED;
         case 505: return EREADONLY;
+        case 506: return ETOOMANYREQUESTS;
         case 550: return ETRIMMED;
         default: return null;
       }
@@ -150,7 +153,7 @@ public final class BookkeeperProtocol {
     }
     
     private static final StatusCode[] VALUES = {
-      EOK, ENOLEDGER, ENOENTRY, EBADREQ, EIO, EUA, EBADVERSION, EFENCED, EREADONLY, ETRIMMED, 
+      EOK, ENOLEDGER, ENOENTRY, EBADREQ, EIO, EUA, EBADVERSION, EFENCED, EREADONLY, ETOOMANYREQUESTS, ETRIMMED, 
     };
     
     public static StatusCode valueOf(
@@ -5990,14 +5993,15 @@ public final class BookkeeperProtocol {
       "\002(\003\"0\n\013AuthMessage\022\026\n\016authPluginName\030\001 \002" +
       "(\t*\t\010\350\007\020\200\200\200\200\002*F\n\017ProtocolVersion\022\017\n\013VERS" +
       "ION_ONE\020\001\022\017\n\013VERSION_TWO\020\002\022\021\n\rVERSION_TH" +
-      "REE\020\003*\225\001\n\nStatusCode\022\007\n\003EOK\020\000\022\016\n\tENOLEDG" +
+      "REE\020\003*\254\001\n\nStatusCode\022\007\n\003EOK\020\000\022\016\n\tENOLEDG" +
       "ER\020\222\003\022\r\n\010ENOENTRY\020\223\003\022\014\n\007EBADREQ\020\224\003\022\010\n\003EI",
       "O\020\365\003\022\010\n\003EUA\020\366\003\022\020\n\013EBADVERSION\020\367\003\022\014\n\007EFEN" +
-      "CED\020\370\003\022\016\n\tEREADONLY\020\371\003\022\r\n\010ETRIMMED\020\246\004*t\n" +
-      "\rOperationType\022\016\n\nREAD_ENTRY\020\001\022\r\n\tADD_EN" +
-      "TRY\020\002\022\024\n\020RANGE_READ_ENTRY\020\003\022\023\n\017RANGE_ADD" +
-      "_ENTRY\020\004\022\010\n\004AUTH\020\005\022\017\n\013TRIM_LEDGER\020jB\037\n\033o" +
-      "rg.apache.bookkeeper.protoH\001"
+      "CED\020\370\003\022\016\n\tEREADONLY\020\371\003\022\025\n\020ETOOMANYREQUES" +
+      "TS\020\372\003\022\r\n\010ETRIMMED\020\246\004*t\n\rOperationType\022\016\n" +
+      "\nREAD_ENTRY\020\001\022\r\n\tADD_ENTRY\020\002\022\024\n\020RANGE_RE" +
+      "AD_ENTRY\020\003\022\023\n\017RANGE_ADD_ENTRY\020\004\022\010\n\004AUTH\020" +
+      "\005\022\017\n\013TRIM_LEDGER\020jB\037\n\033org.apache.bookkee" +
+      "per.protoH\001"
     };
     com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner assigner =
       new com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner() {

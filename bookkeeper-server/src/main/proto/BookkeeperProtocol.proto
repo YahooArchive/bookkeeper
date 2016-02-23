@@ -44,6 +44,7 @@ enum StatusCode {
     EBADVERSION = 503;
     EFENCED = 504;
     EREADONLY = 505;
+    ETOOMANYREQUESTS = 506;
 
     ETRIMMED = 550;
 }
