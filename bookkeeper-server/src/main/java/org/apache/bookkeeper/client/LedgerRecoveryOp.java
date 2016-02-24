@@ -28,7 +28,6 @@ import org.apache.bookkeeper.client.AsyncCallback.CloseCallback;
 import org.apache.bookkeeper.client.AsyncCallback.ReadCallback;
 import org.apache.bookkeeper.client.DigestManager.RecoveryData;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
-import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,6 +56,7 @@ class LedgerRecoveryOp implements ReadCallback, AddCallback {
         RecoveryReadOp(LedgerHandle lh, ScheduledExecutorService scheduler, long startEntryId,
                 long endEntryId, ReadCallback cb, Object ctx) {
             super(lh, scheduler, startEntryId, endEntryId, cb, ctx);
+            this.isRecoveryRead = true;
         }
 
         @Override

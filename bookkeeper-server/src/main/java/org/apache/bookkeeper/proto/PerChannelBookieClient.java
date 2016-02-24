@@ -18,6 +18,8 @@
  */
 package org.apache.bookkeeper.proto;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayDeque;
@@ -400,7 +402,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
                     .setMasterKey(ByteString.copyFrom(masterKey))
                     .setBody(ByteString.copyFrom(toSendArray));
 
-            if (((short)options & BookieProtocol.FLAG_RECOVERY_ADD) == BookieProtocol.FLAG_RECOVERY_ADD) {
+            if (((short)options & BookieProtocol.FLAG_RECOVERY) == BookieProtocol.FLAG_RECOVERY) {
                 addBuilder.setFlag(AddRequest.Flag.RECOVERY_ADD);
             }
 
@@ -474,87 +476,13 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         }
     }
 
-    public void readEntryAndFenceLedger(final long ledgerId, byte[] masterKey,
-                                        final long entryId,
-                                        ReadEntryCallback cb, Object ctx) {
-        CompletionKey completion = null;
-
-        Object request = null;
-        if (useV2WireProtocol) {
-            completion = V2CompletionKey.get(this, ledgerId, entryId, OperationType.READ_ENTRY);
-            request = new BookieProtocol.ReadRequest(BookieProtocol.CURRENT_PROTOCOL_VERSION, ledgerId, entryId,
-                    BookieProtocol.FLAG_DO_FENCING, masterKey);
-        } else {
-            final long txnId = getTxnId();
-            completion = new CompletionKey(this, txnId, OperationType.READ_ENTRY);
-
-            // Build the request and calculate the total size to be included in the packet.
-            BKPacketHeader.Builder headerBuilder = BKPacketHeader.newBuilder()
-                    .setVersion(ProtocolVersion.VERSION_THREE)
-                    .setOperation(OperationType.READ_ENTRY)
-                    .setTxnId(txnId);
-
-            ReadRequest.Builder readBuilder = ReadRequest.newBuilder()
-                    .setLedgerId(ledgerId)
-                    .setEntryId(entryId)
-                    .setMasterKey(ByteString.copyFrom(masterKey))
-                    .setFlag(ReadRequest.Flag.FENCE_LEDGER);
-
-            request = Request.newBuilder()
-                    .setHeader(headerBuilder)
-                    .setReadRequest(readBuilder)
-                    .build();
-        }
-
-        final CompletionKey completionKey = completion;
-        ReadCompletion readCompletion = new ReadCompletion(this, readEntryOpLogger, cb, ctx, ledgerId, entryId);
-        CompletionValue existingValue = completionObjects.putIfAbsent(completion, readCompletion);
-        if (existingValue != null) {
-            // There's a pending read request on same ledger/entry. Use the multimap to track all of them
-            synchronized (this) {
-                completionObjectsV2Conflicts.put(completionKey, readCompletion);
-            }
-        }
-
-        final Channel c = channel;
-        if (c == null) {
-            errorOutReadKey(completionKey);
-            return;
-        }
-
-        final Object readRequest = request;
-
-        try {
-            ChannelFuture future = c.writeAndFlush(readRequest);
-            future.addListener(new ChannelFutureListener() {
-                    @Override
-                    public void operationComplete(ChannelFuture future) throws Exception {
-                        if (future.isSuccess()) {
-                            if (LOG.isDebugEnabled()) {
-                                LOG.debug("Successfully wrote request {} to {}",
-                                          readRequest, c.remoteAddress());
-                            }
-                        } else {
-                            if (!(future.cause() instanceof ClosedChannelException)) {
-                                LOG.warn("Writing readEntryAndFenceLedger(lid={}, eid={}) to channel {} failed : ",
-                                        new Object[] { ledgerId, entryId, c, future.cause() });
-                            }
-                            errorOutReadKey(completionKey);
-                        }
-                    }
-                });
-        } catch(Throwable e) {
-            LOG.warn("Read entry operation {} failed", completionKey, e);
-            errorOutReadKey(completionKey);
-        }
-    }
-
-    public void readEntry(final long ledgerId, final long entryId, ReadEntryCallback cb, Object ctx) {
+    public void readEntry(final long ledgerId, final long entryId, ReadEntryCallback cb, Object ctx, int flags,
+            byte[] masterKey) {
         Object request = null;
         CompletionKey completion = null;
         if (useV2WireProtocol) {
             request = new BookieProtocol.ReadRequest(BookieProtocol.CURRENT_PROTOCOL_VERSION, ledgerId, entryId,
-                    (short) 0);
+                    (short) flags);
             completion = V2CompletionKey.get(this, ledgerId, entryId, OperationType.READ_ENTRY);
         } else {
             final long txnId = getTxnId();
@@ -568,6 +496,15 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             ReadRequest.Builder readBuilder = ReadRequest.newBuilder()
                     .setLedgerId(ledgerId)
                     .setEntryId(entryId);
+
+            // Only one flag can be set on the read requests
+            if (((short)flags & BookieProtocol.FLAG_DO_FENCING) == BookieProtocol.FLAG_DO_FENCING) {
+                readBuilder.setFlag(ReadRequest.Flag.FENCE_LEDGER);
+                checkArgument(masterKey != null);
+                readBuilder.setMasterKey(ByteString.copyFrom(masterKey));
+            } else if (((short)flags & BookieProtocol.FLAG_RECOVERY) == BookieProtocol.FLAG_RECOVERY) {
+                readBuilder.setFlag(ReadRequest.Flag.RECOVERY_READ);
+            }
 
             request = Request.newBuilder()
                     .setHeader(headerBuilder)
@@ -1435,6 +1372,9 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             case EREADONLY:
                 rcToRet = BKException.Code.WriteOnReadOnlyBookieException;
                 break;
+            case ETOOMANYREQUESTS:
+                rcToRet = BKException.Code.TooManyRequestsException;
+                break;
             default:
                 break;
         }
@@ -1463,6 +1403,8 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
             return StatusCode.EFENCED;
         case BookieProtocol.EREADONLY:
             return StatusCode.EREADONLY;
+        case BookieProtocol.ETOOMANYREQUESTS:
+            return StatusCode.ETOOMANYREQUESTS;
         default:
             throw new IllegalArgumentException("Invalid error code: " + errorCode);
         }

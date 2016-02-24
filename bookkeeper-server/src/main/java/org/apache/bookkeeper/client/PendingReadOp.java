@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.bookkeeper.client.AsyncCallback.ReadCallback;
 import org.apache.bookkeeper.client.BKException.BKDigestMatchException;
 import org.apache.bookkeeper.net.BookieSocketAddress;
+import org.apache.bookkeeper.proto.BookieProtocol;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.util.MathUtils;
@@ -69,6 +70,7 @@ class PendingReadOp implements Enumeration<LedgerEntry>, ReadEntryCallback {
     long startEntryId;
     long endEntryId;
     long requestTimeNanos;
+    boolean isRecoveryRead;
     OpStatsLogger readOpLogger;
 
     final int maxMissedReadsAllowed;
@@ -269,6 +271,7 @@ class PendingReadOp implements Enumeration<LedgerEntry>, ReadEntryCallback {
         this.startEntryId = startEntryId;
         this.endEntryId = endEntryId;
         this.scheduler = scheduler;
+        this.isRecoveryRead = false;
         numPendingEntries = endEntryId - startEntryId + 1;
         maxMissedReadsAllowed = getLedgerMetadata().getWriteQuorumSize()
                 - getLedgerMetadata().getAckQuorumSize();
@@ -276,6 +279,14 @@ class PendingReadOp implements Enumeration<LedgerEntry>, ReadEntryCallback {
         heardFromHosts = new HashSet<BookieSocketAddress>();
 
         readOpLogger = lh.bk.getReadOpLogger();
+    }
+
+    /**
+     * Enable the recovery read flag for this operation.
+     */
+    PendingReadOp enableRecoveryFlag() {
+        isRecoveryRead = true;
+        return this;
     }
 
     protected LedgerMetadata getLedgerMetadata() {
@@ -355,8 +366,9 @@ class PendingReadOp implements Enumeration<LedgerEntry>, ReadEntryCallback {
             lh.throttler.acquire();
         }
 
+        int flags = isRecoveryRead ? BookieProtocol.FLAG_RECOVERY : BookieProtocol.FLAG_NONE;
         lh.bk.bookieClient.readEntry(to, lh.ledgerId, entry.entryId,
-                                     this, new ReadContext(to, entry));
+                                     this, new ReadContext(to, entry), flags);
     }
 
     @Override

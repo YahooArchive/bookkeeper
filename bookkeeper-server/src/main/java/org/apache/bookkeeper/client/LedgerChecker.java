@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.proto.BookieClient;
+import org.apache.bookkeeper.proto.BookieProtocol;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback;
 import org.slf4j.Logger;
@@ -101,14 +102,14 @@ public class LedgerChecker {
             ReadManyEntriesCallback manycb = new ReadManyEntriesCallback(1,
                     fragment, cb);
             bookieClient.readEntry(fragment.getAddress(), fragment
-                    .getLedgerId(), firstStored, manycb, null);
+                    .getLedgerId(), firstStored, manycb, null, BookieProtocol.FLAG_NONE);
         } else {
             ReadManyEntriesCallback manycb = new ReadManyEntriesCallback(2,
                     fragment, cb);
             bookieClient.readEntry(fragment.getAddress(), fragment
-                    .getLedgerId(), firstStored, manycb, null);
+                    .getLedgerId(), firstStored, manycb, null, BookieProtocol.FLAG_NONE);
             bookieClient.readEntry(fragment.getAddress(), fragment
-                    .getLedgerId(), lastStored, manycb, null);
+                    .getLedgerId(), lastStored, manycb, null, BookieProtocol.FLAG_NONE);
         }
     }
 
@@ -242,7 +243,7 @@ public class LedgerChecker {
                 IntArrayList writeSet = lh.getDistributionSchedule().getWriteSet(entryToRead);
                 for (int i = 0; i < writeSet.size(); i++) {
                     BookieSocketAddress addr = curEnsembleFinal.get(writeSet.get(i));
-                    bookieClient.readEntry(addr, lh.getId(), entryToRead, eecb, null);
+                    bookieClient.readEntry(addr, lh.getId(), entryToRead, eecb, null, BookieProtocol.FLAG_NONE);
                 }
                 return;
             } else {

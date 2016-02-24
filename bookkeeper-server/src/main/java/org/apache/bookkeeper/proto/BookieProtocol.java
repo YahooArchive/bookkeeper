@@ -43,7 +43,7 @@ public interface BookieProtocol {
     public static final byte LOWEST_COMPAT_PROTOCOL_VERSION = 0;
 
     /**
-     * Current version of the protocol, which client will use. 
+     * Current version of the protocol, which client will use.
      */
     public static final byte CURRENT_PROTOCOL_VERSION = 2;
 
@@ -65,19 +65,19 @@ public interface BookieProtocol {
      */
     public static final int MASTER_KEY_LENGTH = 20;
 
-    /** 
+    /**
      * The first int of a packet is the header.
      * It contains the version, opCode and flags.
      * The initial versions of BK didn't have this structure
-     * and just had an int representing the opCode as the 
-     * first int. This handles that case also. 
+     * and just had an int representing the opCode as the
+     * first int. This handles that case also.
      */
     final static class PacketHeader {
         public static int toInt(byte version, byte opCode, short flags) {
             if (version == 0) {
                 return (int)opCode;
             } else {
-                return ((version & 0xFF) << 24) 
+                return ((version & 0xFF) << 24)
                     | ((opCode & 0xFF) << 16)
                     | (flags & 0xFFFF);
             }
@@ -185,9 +185,14 @@ public interface BookieProtocol {
      */
     public static final int EREADONLY = 105;
 
+    /**
+     * Too many concurrent requests
+     */
+    public static final int ETOOMANYREQUESTS = 106;
+
     public static final short FLAG_NONE = 0x0;
     public static final short FLAG_DO_FENCING = 0x0001;
-    public static final short FLAG_RECOVERY_ADD = 0x0002;
+    public static final short FLAG_RECOVERY = 0x0002;
 
     static class Request {
         byte protocolVersion;
@@ -263,9 +268,9 @@ public interface BookieProtocol {
         }
 
         boolean isRecoveryAdd() {
-            return (flags & FLAG_RECOVERY_ADD) == FLAG_RECOVERY_ADD;
+            return (flags & FLAG_RECOVERY) == FLAG_RECOVERY;
         }
-        
+
         void release() {
             data.release();
         }

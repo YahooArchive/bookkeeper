@@ -17,9 +17,9 @@
  */
 package org.apache.bookkeeper.util;
 
-import io.netty.util.concurrent.DefaultThreadFactory;
-
 import java.util.Random;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
@@ -32,6 +32,8 @@ import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import io.netty.util.concurrent.DefaultThreadFactory;
 
 /**
  * This class provides 2 things over the java {@link ScheduledExecutorService}.
@@ -62,6 +64,20 @@ public class OrderedSafeExecutor {
      *            - name of the thread
      */
     public OrderedSafeExecutor(int numThreads, String threadName) {
+        this(numThreads, threadName, 0);
+    }
+
+    /**
+     * Constructs Safe executor
+     *
+     * @param numThreads
+     *            - number of threads
+     * @param threadName
+     *            - name of the thread
+     * @param maxNumberOfQueuedTasks
+     *            - if > 0, limits the executor queue size
+     */
+    public OrderedSafeExecutor(int numThreads, String threadName, int maxNumberOfQueuedTasks) {
         if (numThreads <= 0) {
             throw new IllegalArgumentException();
         }
@@ -73,10 +89,14 @@ public class OrderedSafeExecutor {
         threadIds = new long[numThreads];
         for (int i = 0; i < numThreads; i++) {
             ThreadFactory tfb = new DefaultThreadFactory(threadName);
-            threads[i] = new ThreadPoolExecutor(1, 1,
-                    0L, TimeUnit.MILLISECONDS,
-                    new UnboundArrayBlockingQueue<Runnable>(),
-                    tfb);
+            BlockingQueue<Runnable> tasksQueue;
+            if (maxNumberOfQueuedTasks > 0) {
+                tasksQueue = new ArrayBlockingQueue<>(maxNumberOfQueuedTasks, true);
+            } else {
+                tasksQueue = new UnboundArrayBlockingQueue<>();
+            }
+
+            threads[i] = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, tasksQueue, tfb);
             final int tid = i;
             try {
                 threads[i].submit(new SafeRunnable() {

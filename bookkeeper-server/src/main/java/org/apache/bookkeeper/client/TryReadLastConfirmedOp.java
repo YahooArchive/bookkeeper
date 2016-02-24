@@ -26,8 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.buffer.ByteBuf;
 
-import java.util.List;
-
 /**
  * This op is try to read last confirmed without involving quorum coverage checking.
  * Use {@link ReadLastConfirmedOp} if you need quorum coverage checking.
@@ -56,7 +54,7 @@ class TryReadLastConfirmedOp implements ReadEntryCallback {
             lh.bk.bookieClient.readEntry(lh.metadata.currentEnsemble.get(i),
                                          lh.ledgerId,
                                          BookieProtocol.LAST_ADD_CONFIRMED,
-                                         this, i);
+                                         this, i, BookieProtocol.FLAG_NONE);
         }
     }
 

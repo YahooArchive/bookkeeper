@@ -24,16 +24,25 @@ import static org.apache.bookkeeper.bookie.BookKeeperServerStats.ADD_ENTRY;
 import static org.apache.bookkeeper.bookie.BookKeeperServerStats.ADD_ENTRY_REQUEST;
 import static org.apache.bookkeeper.bookie.BookKeeperServerStats.READ_ENTRY;
 import static org.apache.bookkeeper.bookie.BookKeeperServerStats.READ_ENTRY_REQUEST;
-import io.netty.channel.Channel;
+
+import java.util.concurrent.RejectedExecutionException;
 
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.processor.RequestProcessor;
+import org.apache.bookkeeper.proto.BookkeeperProtocol.AddRequest.Flag;
+import org.apache.bookkeeper.proto.BookkeeperProtocol.AddResponse;
+import org.apache.bookkeeper.proto.BookkeeperProtocol.ReadRequest;
+import org.apache.bookkeeper.proto.BookkeeperProtocol.ReadResponse;
+import org.apache.bookkeeper.proto.BookkeeperProtocol.Response;
+import org.apache.bookkeeper.proto.BookkeeperProtocol.StatusCode;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.util.OrderedSafeExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import io.netty.channel.Channel;
 
 public class BookieRequestProcessor implements RequestProcessor {
 
@@ -71,8 +80,10 @@ public class BookieRequestProcessor implements RequestProcessor {
                                   StatsLogger statsLogger) {
         this.serverCfg = serverCfg;
         this.bookie = bookie;
-        this.readThreadPool = createExecutor(this.serverCfg.getNumReadWorkerThreads(), "BookieReadThread-" + serverCfg.getBookiePort());
-        this.writeThreadPool = createExecutor(this.serverCfg.getNumAddWorkerThreads(), "BookieWriteThread-" + serverCfg.getBookiePort());
+        this.readThreadPool = createExecutor(this.serverCfg.getNumReadWorkerThreads(),
+                "BookieReadThread-" + serverCfg.getBookiePort(), serverCfg.getMaxPendingReadRequestPerThread());
+        this.writeThreadPool = createExecutor(this.serverCfg.getNumAddWorkerThreads(),
+                "BookieWriteThread-" + serverCfg.getBookiePort(), serverCfg.getMaxPendingAddRequestPerThread());
         // Expose Stats
         this.statsEnabled = serverCfg.isStatisticsEnabled();
         this.addEntryStats = statsLogger.getOpStatsLogger(ADD_ENTRY);
@@ -87,11 +98,11 @@ public class BookieRequestProcessor implements RequestProcessor {
         shutdownExecutor(readThreadPool);
     }
 
-    private OrderedSafeExecutor createExecutor(int numThreads, String nameFormat) {
+    private OrderedSafeExecutor createExecutor(int numThreads, String nameFormat, int maxTasksInQueue) {
         if (numThreads <= 0) {
             return null;
         } else {
-            return new OrderedSafeExecutor(numThreads, nameFormat);
+            return new OrderedSafeExecutor(numThreads, nameFormat, maxTasksInQueue);
         }
     }
 
@@ -155,19 +166,64 @@ public class BookieRequestProcessor implements RequestProcessor {
 
     private void processAddRequestV3(final BookkeeperProtocol.Request r, final Channel c) {
         WriteEntryProcessorV3 write = new WriteEntryProcessorV3(r, c, this);
-        if (null == writeThreadPool) {
+
+        // If it's a recovery add, we want to make sure it gets submitted right away, bypassing the eventual executor
+        // queue, to reduce the chances of ledger recovery exceptions.
+        boolean isRecoveryAdd = r.getAddRequest().hasFlag() && r.getAddRequest().getFlag() == Flag.RECOVERY_ADD;
+        if (null == writeThreadPool || isRecoveryAdd) {
             write.run();
         } else {
-            writeThreadPool.submitOrdered(r.getAddRequest().getLedgerId(), write);
+            try {
+                writeThreadPool.submitOrdered(r.getAddRequest().getLedgerId(), write);
+            } catch (RejectedExecutionException e) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Failed to process request to add entry at {}:{}. Too many pending requests",
+                            r.getAddRequest().getLedgerId(), r.getAddRequest().getEntryId());
+                }
+                AddResponse.Builder addResponse = AddResponse.newBuilder() //
+                        .setLedgerId(r.getAddRequest().getLedgerId()) //
+                        .setEntryId(r.getAddRequest().getEntryId()) //
+                        .setStatus(StatusCode.ETOOMANYREQUESTS);
+                Response.Builder response = Response.newBuilder()
+                        .setHeader(write.getHeader())
+                        .setStatus(addResponse.getStatus())
+                        .setAddResponse(addResponse);
+                Response resp = response.build();
+                write.sendResponse(addResponse.getStatus(), resp, addRequestStats);
+            }
         }
     }
 
     private void processReadRequestV3(final BookkeeperProtocol.Request r, final Channel c) {
         ReadEntryProcessorV3 read = new ReadEntryProcessorV3(r, c, this);
-        if (null == readThreadPool) {
+
+        // If it's a recovery read, we want to make sure it gets submitted right away, bypassing the eventual executor
+        // queue, to reduce the chances of ledger recovery exceptions.
+        boolean isRecoveryRead = r.getReadRequest().hasFlag()
+                && (r.getReadRequest().getFlag() == ReadRequest.Flag.RECOVERY_READ
+                        || r.getReadRequest().getFlag() == ReadRequest.Flag.FENCE_LEDGER);
+        if (null == readThreadPool || isRecoveryRead) {
             read.run();
         } else {
-            readThreadPool.submitOrdered(r.getReadRequest().getLedgerId(), read);
+            try {
+                readThreadPool.submitOrdered(r.getReadRequest().getLedgerId(), read);
+            } catch (RejectedExecutionException e) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Failed to process request to read entry at {}:{}. Too many pending requests",
+                            r.getReadRequest().getLedgerId(), r.getReadRequest().getEntryId());
+                }
+                ReadResponse.Builder readResponse =
+                        ReadResponse.newBuilder() //
+                                .setLedgerId(r.getAddRequest().getLedgerId()) //
+                                .setEntryId(r.getAddRequest().getEntryId()) //
+                                .setStatus(StatusCode.ETOOMANYREQUESTS);
+                Response.Builder response = Response.newBuilder()
+                        .setHeader(read.getHeader())
+                        .setStatus(readResponse.getStatus())
+                        .setReadResponse(readResponse);
+                Response resp = response.build();
+                read.sendResponse(readResponse.getStatus(), resp, readRequestStats);
+            }
         }
     }
 
@@ -191,19 +247,49 @@ public class BookieRequestProcessor implements RequestProcessor {
 
     private void processAddRequest(final BookieProtocol.Request r, final Channel c) {
         WriteEntryProcessor write = new WriteEntryProcessor(r, c, this);
-        if (null == writeThreadPool) {
+
+        // If it's a recovery add, we want to make sure it gets submitted right away, bypassing the eventual executor
+        // queue, to reduce the chances of ledger recovery exceptions.
+        boolean isRecoveryAdd = (r.flags & BookieProtocol.FLAG_RECOVERY) == BookieProtocol.FLAG_RECOVERY;
+        if (null == writeThreadPool || isRecoveryAdd) {
             write.run();
         } else {
-            writeThreadPool.submitOrdered(r.getLedgerId(), write);
+            try {
+                writeThreadPool.submitOrdered(r.getLedgerId(), write);
+            } catch (RejectedExecutionException e) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Failed to process request to add entry at {}:{}. Too many pending requests", r.ledgerId,
+                            r.entryId);
+                }
+
+                write.sendResponse(BookieProtocol.ETOOMANYREQUESTS,
+                        ResponseBuilder.buildErrorResponse(BookieProtocol.ETOOMANYREQUESTS, r), addRequestStats);
+            }
         }
     }
 
     private void processReadRequest(final BookieProtocol.Request r, final Channel c) {
         ReadEntryProcessor read = new ReadEntryProcessor(r, c, this);
-        if (null == readThreadPool) {
+
+        // If it's a recovery read, we want to make sure it gets submitted right away, bypassing the eventual executor
+        // queue, to reduce the chances of ledger recovery exceptions.
+        boolean isRecoveryRead = //
+                ((r.flags & BookieProtocol.FLAG_RECOVERY) == BookieProtocol.FLAG_RECOVERY)
+                        || ((r.flags & BookieProtocol.FLAG_DO_FENCING) == BookieProtocol.FLAG_DO_FENCING);
+        if (null == readThreadPool || isRecoveryRead) {
             read.run();
         } else {
-            readThreadPool.submitOrdered(r.getLedgerId(), read);
+            try {
+                readThreadPool.submitOrdered(r.getLedgerId(), read);
+            } catch (RejectedExecutionException e) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Failed to process request to read entry at {}:{}. Too many pending requests", r.ledgerId,
+                            r.entryId);
+                }
+
+                read.sendResponse(BookieProtocol.ETOOMANYREQUESTS,
+                        ResponseBuilder.buildErrorResponse(BookieProtocol.ETOOMANYREQUESTS, r), readRequestStats);
+            }
         }
     }
 

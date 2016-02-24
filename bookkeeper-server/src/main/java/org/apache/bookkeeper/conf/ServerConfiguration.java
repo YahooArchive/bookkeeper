@@ -98,6 +98,8 @@ public class ServerConfiguration extends AbstractConfiguration {
     // Worker Thread parameters.
     protected final static String NUM_ADD_WORKER_THREADS = "numAddWorkerThreads";
     protected final static String NUM_READ_WORKER_THREADS = "numReadWorkerThreads";
+    protected final static String MAX_PENDING_READ_REQUESTS_PER_THREAD = "maxPendingReadRequestsPerThread";
+    protected final static String MAX_PENDING_ADD_REQUESTS_PER_THREAD = "maxPendingAddRequestsPerThread";
 
     protected final static String READ_BUFFER_SIZE = "readBufferSizeBytes";
     protected final static String WRITE_BUFFER_SIZE = "writeBufferSizeBytes";
@@ -513,7 +515,7 @@ public class ServerConfiguration extends AbstractConfiguration {
     public String getJournalDirName() {
         return this.getString(JOURNAL_DIR, "/tmp/bk-txn");
     }
-    
+
     /**
      * Get dir name to store journal files
      *
@@ -939,6 +941,46 @@ public class ServerConfiguration extends AbstractConfiguration {
     }
 
     /**
+     * Set the max number of pending read requests for each read worker thread. After the quota is reached, new requests
+     * will be failed immediately
+     *
+     * @param maxPendingReadRequestsPerThread
+     * @return server configuration
+     */
+    public ServerConfiguration setMaxPendingReadRequestPerThread(int maxPendingReadRequestsPerThread) {
+        setProperty(MAX_PENDING_READ_REQUESTS_PER_THREAD, maxPendingReadRequestsPerThread);
+        return this;
+    }
+
+    /**
+     * If read workers threads are enabled, limit the number of pending requests, to avoid the executor queue to grow
+     * indefinitely (default: 10000 entries)
+     */
+    public int getMaxPendingReadRequestPerThread() {
+        return getInt(MAX_PENDING_READ_REQUESTS_PER_THREAD, 10000);
+    }
+
+    /**
+     * Set the max number of pending add requests for each add worker thread. After the quota is reached, new requests
+     * will be failed immediately
+     *
+     * @param maxPendingAddRequestsPerThread
+     * @return server configuration
+     */
+    public ServerConfiguration setMaxPendingAddRequestPerThread(int maxPendingAddRequestsPerThread) {
+        setProperty(MAX_PENDING_ADD_REQUESTS_PER_THREAD, maxPendingAddRequestsPerThread);
+        return this;
+    }
+
+    /**
+     * If add workers threads are enabled, limit the number of pending requests, to avoid the executor queue to grow
+     * indefinitely (default: 10000 entries)
+     */
+    public int getMaxPendingAddRequestPerThread() {
+        return getInt(MAX_PENDING_ADD_REQUESTS_PER_THREAD, 10000);
+    }
+
+    /**
      * Get the number of bytes used as capacity for the write buffer. Default is
      * 64KB.
      * NOTE: Make sure this value is greater than the maximum message size.
@@ -1361,7 +1403,7 @@ public class ServerConfiguration extends AbstractConfiguration {
 
     /*
      * Get the {@link LedgerStorage} implementation class name
-     * 
+     *
      * @return the class name
      */
     public String getLedgerStorageClass() {
@@ -1370,7 +1412,7 @@ public class ServerConfiguration extends AbstractConfiguration {
 
     /**
      * Set the {@link LedgerStorage} implementation class name
-     * 
+     *
      * @param ledgerStorageClass the class name
      * @return ServerConfiguration
      */
