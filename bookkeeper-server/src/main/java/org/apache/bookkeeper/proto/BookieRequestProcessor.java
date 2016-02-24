@@ -30,7 +30,9 @@ import java.util.concurrent.RejectedExecutionException;
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.processor.RequestProcessor;
+import org.apache.bookkeeper.proto.BookkeeperProtocol.AddRequest.Flag;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.AddResponse;
+import org.apache.bookkeeper.proto.BookkeeperProtocol.ReadRequest;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.ReadResponse;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.Response;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.StatusCode;
@@ -164,7 +166,11 @@ public class BookieRequestProcessor implements RequestProcessor {
 
     private void processAddRequestV3(final BookkeeperProtocol.Request r, final Channel c) {
         WriteEntryProcessorV3 write = new WriteEntryProcessorV3(r, c, this);
-        if (null == writeThreadPool) {
+
+        // If it's a recovery add, we want to make sure it gets submitted right away, bypassing the eventual executor
+        // queue, to reduce the chances of ledger recovery exceptions.
+        boolean isRecoveryAdd = r.getAddRequest().hasFlag() && r.getAddRequest().getFlag() == Flag.RECOVERY_ADD;
+        if (null == writeThreadPool || isRecoveryAdd) {
             write.run();
         } else {
             try {
@@ -190,7 +196,13 @@ public class BookieRequestProcessor implements RequestProcessor {
 
     private void processReadRequestV3(final BookkeeperProtocol.Request r, final Channel c) {
         ReadEntryProcessorV3 read = new ReadEntryProcessorV3(r, c, this);
-        if (null == readThreadPool) {
+
+        // If it's a recovery read, we want to make sure it gets submitted right away, bypassing the eventual executor
+        // queue, to reduce the chances of ledger recovery exceptions.
+        boolean isRecoveryRead = r.getReadRequest().hasFlag()
+                && (r.getReadRequest().getFlag() == ReadRequest.Flag.RECOVERY_READ
+                        || r.getReadRequest().getFlag() == ReadRequest.Flag.FENCE_LEDGER);
+        if (null == readThreadPool || isRecoveryRead) {
             read.run();
         } else {
             try {
@@ -235,7 +247,11 @@ public class BookieRequestProcessor implements RequestProcessor {
 
     private void processAddRequest(final BookieProtocol.Request r, final Channel c) {
         WriteEntryProcessor write = new WriteEntryProcessor(r, c, this);
-        if (null == writeThreadPool) {
+
+        // If it's a recovery add, we want to make sure it gets submitted right away, bypassing the eventual executor
+        // queue, to reduce the chances of ledger recovery exceptions.
+        boolean isRecoveryAdd = (r.flags & BookieProtocol.FLAG_RECOVERY) == BookieProtocol.FLAG_RECOVERY;
+        if (null == writeThreadPool || isRecoveryAdd) {
             write.run();
         } else {
             try {
@@ -254,7 +270,13 @@ public class BookieRequestProcessor implements RequestProcessor {
 
     private void processReadRequest(final BookieProtocol.Request r, final Channel c) {
         ReadEntryProcessor read = new ReadEntryProcessor(r, c, this);
-        if (null == readThreadPool) {
+
+        // If it's a recovery read, we want to make sure it gets submitted right away, bypassing the eventual executor
+        // queue, to reduce the chances of ledger recovery exceptions.
+        boolean isRecoveryRead = //
+                ((r.flags & BookieProtocol.FLAG_RECOVERY) == BookieProtocol.FLAG_RECOVERY)
+                        || ((r.flags & BookieProtocol.FLAG_DO_FENCING) == BookieProtocol.FLAG_DO_FENCING);
+        if (null == readThreadPool || isRecoveryRead) {
             read.run();
         } else {
             try {

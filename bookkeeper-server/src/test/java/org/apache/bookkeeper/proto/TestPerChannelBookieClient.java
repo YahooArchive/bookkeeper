@@ -45,7 +45,6 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -272,7 +271,7 @@ public class TestPerChannelBookieClient extends BookKeeperClusterTestCase {
                     return;
                 }
 
-                client.readEntryAndFenceLedger(1, "00000111112222233333".getBytes(), 1, cb, null);
+                client.readEntry(1, 1, cb, null, BookieProtocol.FLAG_DO_FENCING, "00000111112222233333".getBytes());
             }
         });
 

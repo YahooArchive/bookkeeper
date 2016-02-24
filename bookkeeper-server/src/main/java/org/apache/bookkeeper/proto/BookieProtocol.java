@@ -192,7 +192,7 @@ public interface BookieProtocol {
 
     public static final short FLAG_NONE = 0x0;
     public static final short FLAG_DO_FENCING = 0x0001;
-    public static final short FLAG_RECOVERY_ADD = 0x0002;
+    public static final short FLAG_RECOVERY = 0x0002;
 
     static class Request {
         byte protocolVersion;
@@ -268,7 +268,7 @@ public interface BookieProtocol {
         }
 
         boolean isRecoveryAdd() {
-            return (flags & FLAG_RECOVERY_ADD) == FLAG_RECOVERY_ADD;
+            return (flags & FLAG_RECOVERY) == FLAG_RECOVERY;
         }
 
         void release() {

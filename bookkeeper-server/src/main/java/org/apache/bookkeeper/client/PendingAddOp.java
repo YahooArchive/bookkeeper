@@ -107,7 +107,7 @@ class PendingAddOp extends SafeRunnable implements WriteCallback, IntProcedure {
     }
 
     void sendWriteRequest(int bookieIndex) {
-        int flags = isRecoveryAdd ? BookieProtocol.FLAG_RECOVERY_ADD : BookieProtocol.FLAG_NONE;
+        int flags = isRecoveryAdd ? BookieProtocol.FLAG_RECOVERY : BookieProtocol.FLAG_NONE;
 
         lh.bk.bookieClient.addEntry(lh.metadata.currentEnsemble.get(bookieIndex), lh.ledgerId, lh.ledgerKey, entryId, toSend,
                 this, bookieIndex, flags);

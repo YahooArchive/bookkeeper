@@ -297,7 +297,7 @@ public class LedgerFragmentReplicator {
                                 ledgerFragmentEntryMcb.processResult(rc, null,
                                         null);
                             }
-                        }, null, BookieProtocol.FLAG_RECOVERY_ADD);
+                        }, null, BookieProtocol.FLAG_RECOVERY);
             }
         }, null);
     }

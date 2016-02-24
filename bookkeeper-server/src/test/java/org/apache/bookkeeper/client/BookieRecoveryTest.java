@@ -26,6 +26,7 @@ import org.apache.bookkeeper.conf.ClientConfiguration;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.meta.MSLedgerManagerFactory;
 import org.apache.bookkeeper.net.BookieSocketAddress;
+import org.apache.bookkeeper.proto.BookieProtocol;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback;
 import org.apache.bookkeeper.test.MultiLedgerManagerMultiDigestTestCase;
@@ -527,7 +528,7 @@ public class BookieRecoveryTest extends MultiLedgerManagerMultiDigestTestCase {
             ReplicationVerificationCallback cb = new ReplicationVerificationCallback(numRequests);
             for (long i = startEntryId; i < endEntryId; i++) {
                 for (BookieSocketAddress addr : e.getValue()) {
-                    bkc.bookieClient.readEntry(addr, lh.getId(), i, cb, addr);
+                    bkc.bookieClient.readEntry(addr, lh.getId(), i, cb, addr, BookieProtocol.FLAG_NONE);
                 }
             }
 
