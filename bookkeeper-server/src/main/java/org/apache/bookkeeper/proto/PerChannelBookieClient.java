@@ -482,7 +482,7 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
         CompletionKey completion = null;
         if (useV2WireProtocol) {
             request = new BookieProtocol.ReadRequest(BookieProtocol.CURRENT_PROTOCOL_VERSION, ledgerId, entryId,
-                    (short) flags);
+                    (short) flags, masterKey);
             completion = V2CompletionKey.get(this, ledgerId, entryId, OperationType.READ_ENTRY);
         } else {
             final long txnId = getTxnId();

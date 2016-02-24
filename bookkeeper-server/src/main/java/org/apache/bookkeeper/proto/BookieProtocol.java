@@ -296,10 +296,6 @@ public interface BookieProtocol {
     }
 
     static class ReadRequest extends Request {
-        ReadRequest(byte protocolVersion, long ledgerId, long entryId, short flags) {
-            init(protocolVersion, READENTRY, ledgerId, entryId, flags, null);
-        }
-
         ReadRequest(byte protocolVersion, long ledgerId, long entryId,
                     short flags, byte[] masterKey) {
             init(protocolVersion, READENTRY, ledgerId, entryId, flags, masterKey);

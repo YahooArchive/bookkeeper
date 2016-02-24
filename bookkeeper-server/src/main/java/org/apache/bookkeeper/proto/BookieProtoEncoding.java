@@ -182,7 +182,7 @@ public class BookieProtoEncoding {
                     byte[] masterKey = readMasterKey(packet);
                     return new BookieProtocol.ReadRequest(version, ledgerId, entryId, flags, masterKey);
                 } else {
-                    return new BookieProtocol.ReadRequest(version, ledgerId, entryId, flags);
+                    return new BookieProtocol.ReadRequest(version, ledgerId, entryId, flags, null);
                 }
             case BookieProtocol.AUTH:
                 BookkeeperProtocol.AuthMessage.Builder builder
@@ -197,7 +197,7 @@ public class BookieProtoEncoding {
 
             return packet;
         }
-        
+
         private static byte[] readMasterKey(ByteBuf packet) {
             byte[] masterKey = null;
 
