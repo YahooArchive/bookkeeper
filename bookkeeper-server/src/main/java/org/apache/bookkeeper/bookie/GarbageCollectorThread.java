@@ -46,6 +46,7 @@ import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStor
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.meta.LedgerManager;
 import org.apache.bookkeeper.meta.LedgerManagerFactory;
+import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.util.MathUtils;
 import org.apache.bookkeeper.util.SafeRunnable;
 import org.apache.zookeeper.ZooKeeper;
@@ -106,6 +107,12 @@ public class GarbageCollectorThread extends SafeRunnable {
     // Boolean to trigger a forced GC.
     final AtomicBoolean forceGarbageCollection = new AtomicBoolean(false);
     final GarbageCleaner garbageCleaner;
+
+    boolean ownZk = false;
+    boolean enableGcOverReplicatedLedger;
+    final long gcOverReplicatedLedgerIntervalMillis;
+    long lastOverReplicatedLedgerGcTimeMillis;
+    final BookieSocketAddress selfBookieAddress;
 
     /**
      * Interface that identifies LedgerStorage implementations using EntryLogger and running periodic entries compaction
@@ -267,6 +274,8 @@ public class GarbageCollectorThread extends SafeRunnable {
             }
         };
 
+        selfBookieAddress = Bookie.getBookieAddress(conf);
+
         // compaction parameters
         minorCompactionThreshold = conf.getMinorCompactionThreshold();
         minorCompactionInterval = conf.getMinorCompactionInterval() * SECOND;
@@ -307,12 +316,19 @@ public class GarbageCollectorThread extends SafeRunnable {
             }
         }
 
+        gcOverReplicatedLedgerIntervalMillis = conf.getGcOverreplicatedLedgerWaitTimeMillis();
+        if (gcOverReplicatedLedgerIntervalMillis > 0) {
+            enableGcOverReplicatedLedger = true;
+        }
+
         LOG.info("Minor Compaction : enabled=" + enableMinorCompaction + ", threshold="
                + minorCompactionThreshold + ", interval=" + minorCompactionInterval);
         LOG.info("Major Compaction : enabled=" + enableMajorCompaction + ", threshold="
                + majorCompactionThreshold + ", interval=" + majorCompactionInterval);
+        LOG.info("Over Replicated Ledger Deletion : enabled=" + enableGcOverReplicatedLedger + ", interval="
+                + gcOverReplicatedLedgerIntervalMillis);
 
-        lastMinorCompactionTime = lastMajorCompactionTime = MathUtils.now();
+        lastMinorCompactionTime = lastMajorCompactionTime = lastOverReplicatedLedgerGcTimeMillis = MathUtils.now();
     }
 
     public synchronized void enableForceGC() {
@@ -353,18 +369,35 @@ public class GarbageCollectorThread extends SafeRunnable {
         // Extract all of the ledger ID's that comprise all of the entry logs
         // (except for the current new one which is still being written to).
         entryLogMetaMap = extractMetaFromEntryLogs(entryLogMetaMap);
+        ZooKeeper zk = null;
 
         try {
+            long curTime = MathUtils.now();
+            LedgerManager ledgerManager = ledgerManagerProvider.getLedgerManager();
+            boolean checkOverreplicatedLedgers = (enableGcOverReplicatedLedger && curTime
+                    - lastOverReplicatedLedgerGcTimeMillis > gcOverReplicatedLedgerIntervalMillis);
+            if (checkOverreplicatedLedgers) {
+                if (ledgerManagerProvider instanceof LedgerManagerProviderImpl) {
+                    zk = ((LedgerManagerProviderImpl) ledgerManagerProvider).getZooKeeper();
+                } else {
+                    zk = ZkUtils.createConnectedZookeeperClient(conf.getZkServers(),
+                            new ZooKeeperWatcherBase(conf.getZkTimeout()));
+                    ownZk = true;
+                }
+            }
             // gc inactive/deleted ledgers
-            GarbageCollector collector = new ScanAndCompareGarbageCollector(
-                ledgerManagerProvider.getLedgerManager(), ledgerStorage);
+            GarbageCollector collector = new ScanAndCompareGarbageCollector(ledgerManager, ledgerStorage,
+                    selfBookieAddress, zk, checkOverreplicatedLedgers, conf.getZkLedgersRootPath());
 
             collector.gc(garbageCleaner);
+
+            if (checkOverreplicatedLedgers) {
+                lastOverReplicatedLedgerGcTimeMillis = MathUtils.now();
+            }
 
             // gc entry logs
             doGcEntryLogs();
 
-            long curTime = MathUtils.now();
             if (force || (enableMajorCompaction &&
                           curTime - lastMajorCompactionTime > majorCompactionInterval)) {
                 // enter major compaction
@@ -390,6 +423,10 @@ public class GarbageCollectorThread extends SafeRunnable {
         } finally {
             try {
                 ledgerManagerProvider.releaseResources();
+                if (ownZk && zk != null) {
+                    zk.close();
+                    ownZk = false;
+                }
             } catch (IOException ioe) {
                 LOG.warn("Error cleaning up ledger manager resources", ioe);
             } catch (InterruptedException ie) {
@@ -637,6 +674,10 @@ public class GarbageCollectorThread extends SafeRunnable {
             LOG.info("instantiate ledger manager {}", lmfactory.getClass().getName());
             ledgerManager = lmfactory.newLedgerManager();
             return ledgerManager;
+        }
+
+        public ZooKeeper getZooKeeper() {
+            return zk;
         }
 
         public void releaseResources() throws IOException, InterruptedException {
