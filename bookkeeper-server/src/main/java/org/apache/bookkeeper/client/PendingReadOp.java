@@ -404,9 +404,13 @@ class PendingReadOp implements Enumeration<LedgerEntry>, ReadEntryCallback {
         if (code != BKException.Code.OK) {
             long firstUnread = LedgerHandle.INVALID_ENTRY_ID;
             for (LedgerEntryRequest req : seq) {
-                if (!req.isComplete()) {
+                if (!req.isComplete() && firstUnread == LedgerHandle.INVALID_ENTRY_ID) {
                     firstUnread = req.getEntryId();
-                    break;
+                }
+
+                // Release buffers since they're going to be discarded
+                if (req.data != null) {
+                    req.data.release();
                 }
             }
             if (LOG.isDebugEnabled()) {
