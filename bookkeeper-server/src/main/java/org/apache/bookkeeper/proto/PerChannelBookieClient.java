@@ -912,6 +912,10 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
                 LOG.debug("Unexpected response received from bookie : " + addr + " for type : " + operationType
                         + " and ledger:entry : " + response.ledgerId + ":" + response.entryId);
             }
+            if (response instanceof org.apache.bookkeeper.proto.BookieProtocol.ReadResponse) {
+                // If the request had already been timed out we need to discard the read response
+                ((org.apache.bookkeeper.proto.BookieProtocol.ReadResponse) response).release();
+            }
         } else {
             long orderingKey = completionValue.ledgerId;
 
@@ -1094,7 +1098,12 @@ public class PerChannelBookieClient extends ChannelInboundHandlerAdapter {
                     + entryId + " rc: " + rcToRet + " entry length: " + body.readableBytes());
         }
 
-        rc.cb.readEntryComplete(rcToRet, ledgerId, entryId, body.slice(), rc.ctx);
+        if (status == StatusCode.EOK) {
+            rc.cb.readEntryComplete(rcToRet, ledgerId, entryId, body.slice(), rc.ctx);
+        } else {
+            body.release();
+            rc.cb.readEntryComplete(rcToRet, ledgerId, entryId, null, rc.ctx);
+        }
     }
 
     /**
