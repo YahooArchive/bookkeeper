@@ -112,7 +112,7 @@ public class LedgerHandle {
 
         this.ledgerId = ledgerId;
 
-        if (bk.getConf().getThrottleValue() > 0) { 
+        if (bk.getConf().getThrottleValue() > 0) {
             this.throttler = RateLimiter.create(bk.getConf().getThrottleValue());
         } else {
             this.throttler = null;
@@ -460,13 +460,30 @@ public class LedgerHandle {
             return;
         }
 
-        asyncReadEntriesInternal(firstEntry, lastEntry, cb, ctx);
+        asyncReadEntriesInternal(firstEntry, lastEntry, cb, ctx, false);
     }
 
-    void asyncReadEntriesInternal(long firstEntry, long lastEntry, ReadCallback cb, Object ctx) {
+    /**
+     * Read the last entry in the ledger
+     *
+     * @param cb
+     *            object implementing read callback interface
+     * @param ctx
+     *            control object
+     */
+    public void asyncReadLastEntry(ReadCallback cb, Object ctx) {
+        long lastEntryId = getLastAddConfirmed();
+        asyncReadEntriesInternal(lastEntryId, lastEntryId, cb, ctx, true);
+    }
+
+    void asyncReadEntriesInternal(long firstEntry, long lastEntry, ReadCallback cb, Object ctx,
+            boolean isRecoveryRead) {
         try {
-            new PendingReadOp(this, bk.scheduler,
-                              firstEntry, lastEntry, cb, ctx).initiate();
+            PendingReadOp pendingReadOp = new PendingReadOp(this, bk.scheduler, firstEntry, lastEntry, cb, ctx);
+            if (isRecoveryRead) {
+                pendingReadOp.enableRecoveryFlag();
+            }
+            pendingReadOp.initiate();
         } catch (InterruptedException e) {
             cb.readComplete(BKException.Code.InterruptedException, this, null, ctx);
         }

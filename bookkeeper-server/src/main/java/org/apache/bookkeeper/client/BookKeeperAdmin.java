@@ -313,7 +313,7 @@ public class BookKeeperAdmin {
     /**
      * Read entries from a ledger synchronously. If the lastEntry is -1, it will read all the entries in the ledger from
      * the firstEntry.
-     * 
+     *
      * @param ledgerId
      * @param firstEntry
      * @param lastEntry
@@ -380,7 +380,7 @@ public class BookKeeperAdmin {
                     counter.inc();
 
                     handle.asyncReadEntriesInternal(nextEntryId, nextEntryId, new LedgerHandle.SyncReadCallback(),
-                            counter);
+                            counter, false);
                     counter.block(0);
                     if (counter.getrc() != BKException.Code.OK) {
                         throw BKException.create(counter.getrc());
