@@ -1162,9 +1162,8 @@ public class BookieShell implements Tool {
             boolean disable = cmdLine.hasOption("d");
             boolean enable = cmdLine.hasOption("e");
 
-            if ((!disable && !enable)
-                || (enable && disable)) {
-                LOG.error("One and only one of -enable and -disable must be specified");
+            if (enable && disable) {
+                LOG.error("Only one of -enable and -disable can be specified");
                 printUsage();
                 return 1;
             }
@@ -1174,7 +1173,10 @@ public class BookieShell implements Tool {
                 zk = ZkUtils.createConnectedZookeeperClient(bkConf.getZkServers(), w);
                 LedgerManagerFactory mFactory = LedgerManagerFactory.newLedgerManagerFactory(bkConf, zk);
                 LedgerUnderreplicationManager underreplicationManager = mFactory.newLedgerUnderreplicationManager();
-                if (enable) {
+                if (!enable && !disable) {
+                    boolean enabled = underreplicationManager.isLedgerReplicationEnabled();
+                    System.out.println("Autorecovery is " + (enabled ? "enabled." : "disabled."));
+                } else if (enable) {
                     if (underreplicationManager.isLedgerReplicationEnabled()) {
                         LOG.warn("Autorecovery already enabled. Doing nothing");
                     } else {
