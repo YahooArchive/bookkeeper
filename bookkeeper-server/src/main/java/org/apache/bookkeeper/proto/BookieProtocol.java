@@ -25,7 +25,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.util.Recycler;
 import io.netty.util.Recycler.Handle;
-import io.netty.util.ReferenceCounted;
 
 import org.apache.bookkeeper.proto.BookkeeperProtocol.AuthMessage;
 
@@ -367,21 +366,26 @@ public interface BookieProtocol {
                                  opCode, ledgerId, entryId, errorCode);
         }
 
-        abstract void recycle();
+        void retain() {
+        }
+
+        void release() {
+        }
+
+        void recycle() {
+        }
     }
 
-    static class ReadResponse extends Response implements ReferenceCounted {
+    static class ReadResponse extends Response {
         final ByteBuf data;
 
         ReadResponse(byte protocolVersion, int errorCode, long ledgerId, long entryId) {
-            init(protocolVersion, READENTRY, errorCode, ledgerId, entryId);
-            this.data = Unpooled.EMPTY_BUFFER;
+            this(protocolVersion, errorCode, ledgerId, entryId, Unpooled.EMPTY_BUFFER);
         }
 
         ReadResponse(byte protocolVersion, int errorCode, long ledgerId, long entryId, ByteBuf data) {
             init(protocolVersion, READENTRY, errorCode, ledgerId, entryId);
             this.data = data;
-            retain();
         }
 
         boolean hasData() {
@@ -393,33 +397,13 @@ public interface BookieProtocol {
         }
 
         @Override
-        public int refCnt() {
-            return data != null ? data.refCnt() : 0;
-        }
-
-        @Override
-        public ReferenceCounted retain() {
+        public void retain() {
             data.retain();
-            return this;
         }
 
         @Override
-        public ReferenceCounted retain(int increment) {
-            data.retain(increment);
-            return this;
-        }
-
-        @Override
-        public boolean release() {
-            return data.release();
-        }
-
-        @Override
-        public boolean release(int decrement) {
-            return data.release(decrement);
-        }
-
-        void recycle() {
+        public void release() {
+            data.release();
         }
     }
 
@@ -456,9 +440,6 @@ public interface BookieProtocol {
 
         AuthMessage getAuthMessage() {
             return authMessage;
-        }
-
-        void recycle() {
         }
     }
 

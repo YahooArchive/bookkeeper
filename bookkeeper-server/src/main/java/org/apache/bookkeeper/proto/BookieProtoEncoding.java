@@ -292,12 +292,8 @@ public class BookieProtoEncoding {
                 ledgerId = buffer.readLong();
                 entryId = buffer.readLong();
 
-                if (rc == BookieProtocol.EOK) {
-                    ByteBuf content = buffer.slice();
-                    return new BookieProtocol.ReadResponse(version, rc, ledgerId, entryId, content);
-                } else {
-                    return new BookieProtocol.ReadResponse(version, rc, ledgerId, entryId);
-                }
+                ByteBuf content = buffer.retain().slice();
+                return new BookieProtocol.ReadResponse(version, rc, ledgerId, entryId, content);
             case BookieProtocol.AUTH:
                 ByteBufInputStream bufStream = new ByteBufInputStream(buffer);
                 BookkeeperProtocol.AuthMessage.Builder builder

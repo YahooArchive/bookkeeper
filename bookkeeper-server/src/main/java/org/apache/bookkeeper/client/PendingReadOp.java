@@ -21,6 +21,7 @@
 package org.apache.bookkeeper.client;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.ReferenceCountUtil;
 
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -234,7 +235,6 @@ class PendingReadOp implements Enumeration<LedgerEntry>, ReadEntryCallback {
                 content = lh.macManager.verifyDigestAndReturnData(entryId, buffer);
             } catch (BKDigestMatchException e) {
                 logErrorAndReattemptRead(host, "Mac mismatch", BKException.Code.DigestMatchException);
-                buffer.release();
                 return false;
             }
 
@@ -247,7 +247,6 @@ class PendingReadOp implements Enumeration<LedgerEntry>, ReadEntryCallback {
                 data = content;
                 return true;
             } else {
-                buffer.release();
                 return false;
             }
         }
@@ -385,8 +384,14 @@ class PendingReadOp implements Enumeration<LedgerEntry>, ReadEntryCallback {
 
         if (entry.complete(rctx.to, buffer)) {
             numPendingEntries--;
+            entry.data.retain();
+
             if (numPendingEntries == 0) {
                 submitCallback(BKException.Code.OK);
+            } else if (cb == null) {
+                // Pending read operation already failed for some previous entries, we can discard the current result
+                entry.data.release();
+                entry.data = null;
             }
         }
 
@@ -409,9 +414,8 @@ class PendingReadOp implements Enumeration<LedgerEntry>, ReadEntryCallback {
                 }
 
                 // Release buffers since they're going to be discarded
-                if (req.data != null) {
-                    req.data.release();
-                }
+                ReferenceCountUtil.release(req.data);
+                req.data = null;
             }
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Read of ledger entry failed: L{} E{}-E{}, Heard from {}. First unread entry is {}",
