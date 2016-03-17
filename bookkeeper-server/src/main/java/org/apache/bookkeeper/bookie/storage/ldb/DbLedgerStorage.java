@@ -710,6 +710,10 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         return numberOfEntries;
     }
 
+    public EntryLocationIndex getEntryLocationIndex() {
+        return entryLocationIndex;
+    }
+
     private void recordSuccessfulEvent(OpStatsLogger logger, long startTimeNanos) {
         logger.registerSuccessfulEvent(MathUtils.elapsedNanos(startTimeNanos), TimeUnit.NANOSECONDS);
     }

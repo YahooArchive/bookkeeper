@@ -17,6 +17,7 @@ import org.apache.bookkeeper.bookie.InterleavedLedgerStorage;
 import org.apache.bookkeeper.bookie.LedgerDirsManager;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.stats.NullStatsLogger;
+import org.apache.commons.io.FileUtils;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -91,7 +92,7 @@ public class ConversionTest {
         // Run conversion tool
         BookieShell shell = new BookieShell();
         shell.setConf(conf);
-        int res = shell.run(new String[] { "upgrade-db-storage" });
+        int res = shell.run(new String[] { "convert-to-db-storage" });
 
         Assert.assertEquals(0, res);
 
@@ -134,5 +135,6 @@ public class ConversionTest {
 
         interleavedStorage.shutdown();
         dbStorage.shutdown();
+        FileUtils.forceDelete(tmpDir);
     }
 }
