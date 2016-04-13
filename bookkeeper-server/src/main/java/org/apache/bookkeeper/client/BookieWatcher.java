@@ -315,7 +315,7 @@ class BookieWatcher implements Watcher, ChildrenCallback {
     private static class ReadOnlyBookieWatcher implements Watcher, ChildrenCallback {
 
         private final static Logger LOG = LoggerFactory.getLogger(ReadOnlyBookieWatcher.class);
-        private HashSet<BookieSocketAddress> readOnlyBookies = new HashSet<BookieSocketAddress>();
+        private volatile HashSet<BookieSocketAddress> readOnlyBookies = new HashSet<BookieSocketAddress>();
         private BookKeeper bk;
         private String readOnlyBookieRegPath;
 
@@ -364,7 +364,7 @@ class BookieWatcher implements Watcher, ChildrenCallback {
 
         void notifyBookiesChanged(final BookiesListener listener) throws BKException {
             try {
-                bk.getZkHandle().getChildren(this.readOnlyBookieRegPath, new Watcher() {
+                List<String> children = bk.getZkHandle().getChildren(this.readOnlyBookieRegPath, new Watcher() {
                     public void process(WatchedEvent event) {
                         // listen children changed event from ZooKeeper
                         if (event.getType() == EventType.NodeChildrenChanged) {
@@ -372,6 +372,10 @@ class BookieWatcher implements Watcher, ChildrenCallback {
                         }
                     }
                 });
+
+                // Update the list of read-only bookies
+                HashSet<BookieSocketAddress> newReadOnlyBookies = convertToBookieAddresses(children);
+                readOnlyBookies = newReadOnlyBookies;
             } catch (KeeperException ke) {
                 logger.error("Error registering watcher with zookeeper", ke);
                 throw new BKException.ZKException();
