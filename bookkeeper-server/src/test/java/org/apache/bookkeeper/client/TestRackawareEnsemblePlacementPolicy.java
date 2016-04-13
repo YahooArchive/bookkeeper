@@ -83,7 +83,12 @@ public class TestRackawareEnsemblePlacementPolicy {
         addrs.add(addr4);
         repp.onClusterChanged(addrs, new HashSet<BookieSocketAddress>());
         // replace node under r2
-        BookieSocketAddress replacedBookie = repp.replaceBookie(addr2, new HashSet<BookieSocketAddress>());
+        Set<BookieSocketAddress> ensembleBookies = new HashSet<BookieSocketAddress>();
+        ensembleBookies.add(addr1);
+        ensembleBookies.add(addr2);
+        ensembleBookies.add(addr4);
+        BookieSocketAddress replacedBookie = repp.replaceBookie(addr2, ensembleBookies,
+                new HashSet<BookieSocketAddress>());
         assertEquals(addr3, replacedBookie);
     }
 
@@ -108,10 +113,13 @@ public class TestRackawareEnsemblePlacementPolicy {
         // replace node under r2
         Set<BookieSocketAddress> excludedAddrs = new HashSet<BookieSocketAddress>();
         excludedAddrs.add(addr1);
-        BookieSocketAddress replacedBookie = repp.replaceBookie(addr2, excludedAddrs);
+        Set<BookieSocketAddress> ensembleBookies = new HashSet<BookieSocketAddress>();
+        ensembleBookies.add(addr4);
+        ensembleBookies.add(addr2);
+        BookieSocketAddress replacedBookie = repp.replaceBookie(addr2, ensembleBookies, excludedAddrs);
 
         assertFalse(addr1.equals(replacedBookie));
-        assertTrue(addr3.equals(replacedBookie) || addr4.equals(replacedBookie));
+        assertEquals(addr3, replacedBookie);
     }
 
     @Test(timeout = 60000)
@@ -138,11 +146,38 @@ public class TestRackawareEnsemblePlacementPolicy {
         excludedAddrs.add(addr3);
         excludedAddrs.add(addr4);
         try {
-            repp.replaceBookie(addr2, excludedAddrs);
+            repp.replaceBookie(addr2, new HashSet<BookieSocketAddress>(), excludedAddrs);
             fail("Should throw BKNotEnoughBookiesException when there is not enough bookies");
         } catch (BKNotEnoughBookiesException bnebe) {
             // should throw not enou
         }
+    }
+
+    @Test(timeout = 60000)
+    public void testReplaceBookieWithEnoughBookiesInSameRackAsEnsemble() throws Exception {
+        BookieSocketAddress addr1 = new BookieSocketAddress("127.0.0.1", 3181);
+        BookieSocketAddress addr2 = new BookieSocketAddress("127.0.0.2", 3181);
+        BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
+        BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
+        // update dns mapping
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r2");
+        StaticDNSResolver.addNodeToRack(addr4, "/r3");
+        // Update cluster
+        Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
+        addrs.add(addr1);
+        addrs.add(addr2);
+        addrs.add(addr3);
+        addrs.add(addr4);
+        repp.onClusterChanged(addrs, new HashSet<BookieSocketAddress>());
+        // replace node under r2
+        Set<BookieSocketAddress> ensembleBookies = new HashSet<BookieSocketAddress>();
+        ensembleBookies.add(addr2);
+        ensembleBookies.add(addr4);
+        BookieSocketAddress replacedBookie = repp.replaceBookie(addr4, ensembleBookies,
+                new HashSet<BookieSocketAddress>());
+        assertEquals(addr1, replacedBookie);
     }
 
     @Test(timeout = 60000)

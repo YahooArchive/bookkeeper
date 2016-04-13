@@ -78,12 +78,15 @@ public interface EnsemblePlacementPolicy {
      * {@link BKNotEnoughBookiesException} is thrown.
      *
      * @param bookieToReplace
-     *          bookie to replace
+     *            bookie to replace
+     * @param currentEnsemble
+     *            bookies in ensemble
      * @param excludeBookies
-     *          bookies that should not be considered as candidate.
+     *            bookies that should not be considered as candidate.
      * @return the bookie chosen as target.
      * @throws BKNotEnoughBookiesException
      */
     public BookieSocketAddress replaceBookie(BookieSocketAddress bookieToReplace,
-            Set<BookieSocketAddress> excludeBookies) throws BKNotEnoughBookiesException;
+            Set<BookieSocketAddress> currentEnsemble, Set<BookieSocketAddress> excludeBookies)
+            throws BKNotEnoughBookiesException;
 }
