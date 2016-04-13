@@ -95,7 +95,7 @@ public class AutoRecoveryMain {
         auditorElector = new AuditorElector(Bookie.getBookieAddress(conf).toString(), conf,
                 zk, statsLogger.scope(AUDITOR_SCOPE));
         replicationWorker = new ReplicationWorker(zk, conf,
-                Bookie.getBookieAddress(conf), statsLogger.scope(REPLICATION_WORKER_SCOPE));
+                statsLogger.scope(REPLICATION_WORKER_SCOPE));
         deathWatcher = new AutoRecoveryDeathWatcher(this);
     }
 
@@ -104,7 +104,7 @@ public class AutoRecoveryMain {
         this.conf = conf;
         this.zk = zk;
         auditorElector = new AuditorElector(Bookie.getBookieAddress(conf).toString(), conf, zk);
-        replicationWorker = new ReplicationWorker(zk, conf, Bookie.getBookieAddress(conf));
+        replicationWorker = new ReplicationWorker(zk, conf);
         deathWatcher = new AutoRecoveryDeathWatcher(this);
     }
 
