@@ -421,6 +421,7 @@ public class BookieShell implements Tool {
 
         ReadLedgerEntriesCmd() {
             super(CMD_READ_LEDGER_ENTRIES);
+            lOpts.addOption("r", "force-recovery", false, "Ensure the ledger is properly closed before reading");
         }
 
         @Override
@@ -435,7 +436,7 @@ public class BookieShell implements Tool {
 
         @Override
         String getUsage() {
-            return "readledger <ledger_id> [<start_entry_id> [<end_entry_id>]]";
+            return "readledger [-force-recovery] <ledger_id> [<start_entry_id> [<end_entry_id>]]";
         }
 
         @Override
@@ -447,22 +448,7 @@ public class BookieShell implements Tool {
                 return -1;
             }
 
-            long ledgerId;
-            long firstEntry = 0;
-            long lastEntry = -1;
-            try {
-                ledgerId = Long.parseLong(leftArgs[0]);
-                if (leftArgs.length >= 2) {
-                    firstEntry = Long.parseLong(leftArgs[1]);
-                }
-                if (leftArgs.length >= 3) {
-                    lastEntry = Long.parseLong(leftArgs[2]);
-                }
-            } catch (NumberFormatException nfe) {
-                System.err.println("ERROR: invalid number " + nfe.getMessage());
-                printUsage();
-                return -1;
-            }
+            boolean forceRecovery = cmdLine.hasOption("r");
 
             ClientConfiguration conf = new ClientConfiguration();
             conf.addConfiguration(bkConf);
@@ -470,15 +456,42 @@ public class BookieShell implements Tool {
             BookKeeperAdmin bk = null;
             try {
                 bk = new BookKeeperAdmin(conf);
+
+                long ledgerId = Long.parseLong(leftArgs[0]);
+
+                long firstEntry = 0;
+                long lastEntry = -1;
+
+                if (leftArgs.length >= 2) {
+                    firstEntry = Long.parseLong(leftArgs[1]);
+                }
+
+                if (leftArgs.length >= 3) {
+                    lastEntry = Long.parseLong(leftArgs[2]);
+                }
+
+                if (forceRecovery) {
+                    // Force the opening of the ledger to trigger recovery
+                    LedgerHandle lh = bk.openLedger(ledgerId);
+                    if (lastEntry == -1 || lastEntry > lh.getLastAddConfirmed()) {
+                        lastEntry = lh.getLastAddConfirmed();
+                    }
+                }
+
                 Iterator<LedgerEntry> entries = bk.readEntries(ledgerId, firstEntry, lastEntry).iterator();
                 while (entries.hasNext()) {
                     LedgerEntry entry = entries.next();
                     ByteBuf data = entry.getEntryBuffer();
-                    System.out.println("Entry Id: " + entry.getEntryId() + ", Data: " + ByteBufUtil.prettyHexDump(data));
+                    System.out
+                            .println("Entry Id: " + entry.getEntryId() + ", Data: " + ByteBufUtil.prettyHexDump(data));
                     data.release();
                 }
+            } catch (NumberFormatException nfe) {
+                System.err.println("ERROR: invalid number " + nfe.getMessage());
+                printUsage();
+                return -1;
             } catch (Exception e) {
-                LOG.error("Error reading entries from ledger {}", ledgerId, e.getCause());
+                LOG.error("Error reading entries from ledger", e);
                 return -1;
             } finally {
                 if (bk != null) {
