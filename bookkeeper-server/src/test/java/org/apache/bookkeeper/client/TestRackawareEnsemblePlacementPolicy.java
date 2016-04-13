@@ -48,9 +48,10 @@ public class TestRackawareEnsemblePlacementPolicy {
     @Before
     public void setUp() throws Exception {
         StaticDNSResolver.reset();
-        StaticDNSResolver.addNodeToRack(InetAddress.getLocalHost().getHostAddress(), NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack("127.0.0.1", NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack("localhost", NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(new BookieSocketAddress(InetAddress.getLocalHost().getHostAddress(), 0),
+                NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(new BookieSocketAddress("127.0.0.1", 0), NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(new BookieSocketAddress("localhost", 0), NetworkTopology.DEFAULT_RACK);
         LOG.info("Set up static DNS Resolver.");
         conf.setProperty(REPP_DNS_RESOLVER_CLASS, StaticDNSResolver.class.getName());
         repp = new RackawareEnsemblePlacementPolicy();
@@ -69,11 +70,11 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
         BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
+        StaticDNSResolver.addNodeToRack(addr1,
                 NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r3");
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r2");
+        StaticDNSResolver.addNodeToRack(addr4, "/r3");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -93,11 +94,10 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
         BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r3");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r4");
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r3");
+        StaticDNSResolver.addNodeToRack(addr4, "/r4");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -121,11 +121,10 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
         BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r3");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r4");
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r3");
+        StaticDNSResolver.addNodeToRack(addr4, "/r4");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -176,11 +175,10 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
         BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r2");
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r2");
+        StaticDNSResolver.addNodeToRack(addr4, "/r2");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -211,16 +209,14 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr7 = new BookieSocketAddress("127.0.0.7", 3181);
         BookieSocketAddress addr8 = new BookieSocketAddress("127.0.0.8", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r3");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r4");
-        StaticDNSResolver.addNodeToRack(addr5.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr6.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr7.getSocketAddress().getAddress().getHostAddress(), "/r3");
-        StaticDNSResolver.addNodeToRack(addr8.getSocketAddress().getAddress().getHostAddress(), "/r4");
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r3");
+        StaticDNSResolver.addNodeToRack(addr4, "/r4");
+        StaticDNSResolver.addNodeToRack(addr5, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr6, "/r2");
+        StaticDNSResolver.addNodeToRack(addr7, "/r3");
+        StaticDNSResolver.addNodeToRack(addr8, "/r4");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -252,11 +248,10 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
         BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r3");
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r2");
+        StaticDNSResolver.addNodeToRack(addr4, "/r3");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -277,7 +272,7 @@ public class TestRackawareEnsemblePlacementPolicy {
             for (int j = 0; j < writeQuorumSize; j++) {
                 int bookieIdx = (i + j) % ensembleSize;
                 BookieSocketAddress addr = ensemble.get(bookieIdx);
-                racks.add(StaticDNSResolver.getRack(addr.getSocketAddress().getAddress().getHostAddress()));
+                racks.add(StaticDNSResolver.getRack(addr));
             }
             numCoveredWriteQuorums += (racks.size() > 1 ? 1 : 0);
         }

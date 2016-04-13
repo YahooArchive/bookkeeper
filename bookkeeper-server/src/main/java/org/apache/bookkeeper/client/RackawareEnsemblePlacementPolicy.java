@@ -31,7 +31,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.apache.bookkeeper.client.BKException.BKNotEnoughBookiesException;
 import org.apache.bookkeeper.conf.Configurable;
 import org.apache.bookkeeper.net.BookieSocketAddress;
-import org.apache.bookkeeper.net.CachedDNSToSwitchMapping;
 import org.apache.bookkeeper.net.DNSToSwitchMapping;
 import org.apache.bookkeeper.net.NetworkTopology;
 import org.apache.bookkeeper.net.Node;
@@ -273,9 +272,9 @@ public class RackawareEnsemblePlacementPolicy implements EnsemblePlacementPolicy
     static class DefaultResolver implements DNSToSwitchMapping {
 
         @Override
-        public List<String> resolve(List<String> names) {
-            List<String> rNames = new ArrayList<String>(names.size());
-            for (@SuppressWarnings("unused") String name : names) {
+        public List<String> resolve(List<BookieSocketAddress> bookieAddressList) {
+            List<String> rNames = new ArrayList<String>(bookieAddressList.size());
+            for (@SuppressWarnings("unused") BookieSocketAddress bookieAddress : bookieAddressList) {
                 rNames.add(NetworkTopology.DEFAULT_RACK);
             }
             return rNames;
@@ -338,17 +337,14 @@ public class RackawareEnsemblePlacementPolicy implements EnsemblePlacementPolicy
     }
 
     private String resolveNetworkLocation(BookieSocketAddress addr) {
-        List<String> names = new ArrayList<String>(1);
-        if (dnsResolver instanceof CachedDNSToSwitchMapping) {
-            names.add(addr.getSocketAddress().getAddress().getHostAddress());
-        } else {
-            names.add(addr.getSocketAddress().getHostName());
-        }
+        List<BookieSocketAddress> bookieAddressList = new ArrayList<BookieSocketAddress>(1);
+        bookieAddressList.add(addr);
+
         // resolve network addresses
-        List<String> rNames = dnsResolver.resolve(names);
+        List<String> rNames = dnsResolver.resolve(bookieAddressList);
         String netLoc;
         if (null == rNames) {
-            LOG.warn("Failed to resolve network location for {}, using default rack for them : {}.", names,
+            LOG.warn("Failed to resolve network location for {}, using default rack for them : {}.", bookieAddressList,
                     NetworkTopology.DEFAULT_RACK);
             netLoc = NetworkTopology.DEFAULT_RACK;
         } else {
