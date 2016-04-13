@@ -27,7 +27,6 @@ import java.io.IOException;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.RandomAccessFile;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -40,6 +39,8 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.Sets;
 
 import static org.junit.Assert.*;
 
@@ -302,4 +303,34 @@ public class EntryLogTest {
         assertEquals(120, meta.getRemainingSize());
     }
 
+    /**
+     * Test the getEntryLogsSet() method
+     */
+    @Test(timeout=60000)
+    public void testGetEntryLogsSet() throws Exception {
+        File tmpDir = createTempDir("bkTest", ".dir");
+        File curDir = Bookie.getCurrentDirectory(tmpDir);
+        Bookie.checkDirectoryStructure(curDir);
+
+        int gcWaitTime = 1000;
+        ServerConfiguration conf = TestBKConfiguration.newServerConfiguration();
+        conf.setGcWaitTime(gcWaitTime);
+        conf.setLedgerDirNames(new String[] {tmpDir.toString()});
+        Bookie bookie = new Bookie(conf);
+
+        // create some entries
+        EntryLogger logger = ((InterleavedLedgerStorage)bookie.ledgerStorage).entryLogger;
+
+        assertEquals(Sets.newHashSet(0L), logger.getEntryLogsSet());
+
+        logger.rollLog();
+        logger.flushRotatedLogs();
+
+        assertEquals(Sets.newHashSet(0L, 1L), logger.getEntryLogsSet());
+
+        logger.rollLog();
+        logger.flushRotatedLogs();
+
+        assertEquals(Sets.newHashSet(0L, 1L, 2L), logger.getEntryLogsSet());
+    }
 }

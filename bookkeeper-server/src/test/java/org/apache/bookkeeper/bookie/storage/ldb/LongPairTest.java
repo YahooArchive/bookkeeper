@@ -1,6 +1,5 @@
 package org.apache.bookkeeper.bookie.storage.ldb;
 
-import org.apache.bookkeeper.bookie.storage.ldb.LongPair;
 import org.junit.Test;
 
 import static junit.framework.Assert.assertEquals;

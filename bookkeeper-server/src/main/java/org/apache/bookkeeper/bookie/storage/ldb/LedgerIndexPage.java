@@ -13,10 +13,10 @@ import com.google.common.base.Objects;
 
 /**
  * The LedgerIndexPage holds the position for a set of entries in a ledger.
- * 
+ *
  * The position is a Long integer that identifies the EntryLogger and the offset at which the entry data is stored. If
  * the offset in the table is 0, it means that we don't have this entry stored.
- * 
+ *
  */
 public class LedgerIndexPage implements Entry<byte[], byte[]> {
     private final long ledgerId;
@@ -46,7 +46,7 @@ public class LedgerIndexPage implements Entry<byte[], byte[]> {
                 locationsTable.putLong(offset, location);
             } catch (Exception e) {
                 log.error("Error adding location: ledger: {} firstEntry: {} lastEntry: {} entryId: {} location: {}",
-                        new Object[] { ledgerId, firstEntry, lastEntry, entryId, location }, e);
+                        new Object[] { ledgerId, firstEntry, lastEntry, entryId, location, e});
 
                 throw new RuntimeException(e);
             }

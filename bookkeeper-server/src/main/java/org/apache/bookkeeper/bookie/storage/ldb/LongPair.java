@@ -26,6 +26,20 @@ class LongPair implements Comparable<LongPair> {
         }
     }
 
+    @Override
+    public int hashCode() {
+        return Long.hashCode(first) + 31 * Long.hashCode(second);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (obj instanceof LongPair) {
+            LongPair other = (LongPair) obj;
+            return first == other.first && second == other.second;
+        }
+        return false;
+    }
+
     public static LongPair fromArray(byte[] array) {
         ByteBuffer buf = ByteBuffer.wrap(array);
         long first = buf.getLong();
