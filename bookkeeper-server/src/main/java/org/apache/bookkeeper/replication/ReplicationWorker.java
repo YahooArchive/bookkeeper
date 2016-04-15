@@ -19,18 +19,18 @@
  */
 package org.apache.bookkeeper.replication;
 
+import static org.apache.bookkeeper.replication.ReplicationStats.BK_CLIENT_SCOPE;
+import static org.apache.bookkeeper.replication.ReplicationStats.REREPLICATE_OP;
+
 import java.io.IOException;
-import java.util.List;
-import java.util.Set;
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.SortedMap;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-
-import com.google.common.base.Stopwatch;
 
 import org.apache.bookkeeper.bookie.BookieThread;
 import org.apache.bookkeeper.client.BKException;
@@ -59,8 +59,7 @@ import org.apache.zookeeper.ZooKeeper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.bookkeeper.replication.ReplicationStats.BK_CLIENT_SCOPE;
-import static org.apache.bookkeeper.replication.ReplicationStats.REREPLICATE_OP;
+import com.google.common.base.Stopwatch;
 
 /**
  * ReplicationWorker will take the fragments one by one from
@@ -69,13 +68,13 @@ import static org.apache.bookkeeper.replication.ReplicationStats.REREPLICATE_OP;
 public class ReplicationWorker implements Runnable {
     private final static Logger LOG = LoggerFactory
             .getLogger(ReplicationWorker.class);
+
     final private LedgerUnderreplicationManager underreplicationManager;
     private final ServerConfiguration conf;
     private final ZooKeeper zkc;
     private volatile boolean workerRunning = false;
     final private BookKeeperAdmin admin;
     private final LedgerChecker ledgerChecker;
-    private final BookieSocketAddress targetBookie;
     private final BookKeeper bkc;
     private final Thread workerThread;
     private final long openLedgerRereplicationGracePeriod;
@@ -86,45 +85,36 @@ public class ReplicationWorker implements Runnable {
 
     /**
      * Replication worker for replicating the ledger fragments from
-     * UnderReplicationManager to the targetBookie. This target bookie will be a
-     * local bookie.
+     * UnderReplicationManager to a bookie, honoring the ensemble 
+     * placement policy for the fragment, in the cluster.
      *
      * @param zkc
      *            - ZK instance
      * @param conf
      *            - configurations
-     * @param targetBKAddr
-     *            - to where replication should happen. Ideally this will be
-     *            local Bookie address.
      */
     public ReplicationWorker(final ZooKeeper zkc,
-                             final ServerConfiguration conf, BookieSocketAddress targetBKAddr)
+            final ServerConfiguration conf)
             throws CompatibilityException, KeeperException,
             InterruptedException, IOException {
-        this(zkc, conf, targetBKAddr, NullStatsLogger.INSTANCE);
+        this(zkc, conf, NullStatsLogger.INSTANCE);
     }
 
     /**
      * Replication worker for replicating the ledger fragments from
-     * UnderReplicationManager to the targetBookie. This target bookie will be a
-     * local bookie.
+     * UnderReplicationManager to a bookie, honoring the ensemble 
+     * placement policy for the fragment, in the cluster.
      *
      * @param zkc
      *            - ZK instance
      * @param conf
      *            - configurations
-     * @param targetBKAddr
-     *            - to where replication should happen. Ideally this will be
-     *            local Bookie address.
      */
-    public ReplicationWorker(final ZooKeeper zkc,
-                             final ServerConfiguration conf, BookieSocketAddress targetBKAddr,
-                             StatsLogger statsLogger)
-            throws CompatibilityException, KeeperException,
+    public ReplicationWorker(final ZooKeeper zkc, final ServerConfiguration conf,
+            StatsLogger statsLogger) throws CompatibilityException, KeeperException,
             InterruptedException, IOException {
         this.zkc = zkc;
         this.conf = conf;
-        this.targetBookie = targetBKAddr;
         LedgerManagerFactory mFactory = LedgerManagerFactory
                 .newLedgerManagerFactory(this.conf, this.zkc);
         this.underreplicationManager = mFactory
@@ -163,11 +153,7 @@ public class ReplicationWorker implements Runnable {
                 return;
             } catch (BKException e) {
                 LOG.error("BKException while replicating fragments", e);
-                if (e instanceof BKException.BKWriteOnReadOnlyBookieException) {
-                    waitTillTargetBookieIsWritable();
-                } else {
-                    waitBackOffTime();
-                }
+                waitBackOffTime();
             } catch (UnavailableException e) {
                 LOG.error("UnavailableException "
                         + "while replicating fragments", e);
@@ -184,17 +170,10 @@ public class ReplicationWorker implements Runnable {
         }
     }
 
-    private void waitTillTargetBookieIsWritable() {
-        LOG.info("Waiting for target bookie {} to be back in read/write mode", targetBookie);
-        while (admin.getReadOnlyBookies().contains(targetBookie)) {
-            waitBackOffTime();
-        }
-        LOG.info("Target bookie {} is back in read/write mode", targetBookie);
-    }
-
     /**
      * Replicates the under replicated fragments from failed bookie ledger to
-     * targetBookie
+     * a bookie, honoring the ensemble placement policy for the fragment, in
+     * the cluster.
      */
     private void rereplicate() throws InterruptedException, BKException,
             UnavailableException {
@@ -258,24 +237,18 @@ public class ReplicationWorker implements Runnable {
             if (!ledgerFragment.isClosed()) {
                 foundOpenFragments = true;
                 continue;
-            } else if (isTargetBookieExistsInFragmentEnsemble(lh,
-                    ledgerFragment)) {
-                LOG.debug("Target Bookie[{}] found in the fragment ensemble: {}", targetBookie,
-                        ledgerFragment.getEnsemble());
-                continue;
             }
             try {
-                admin.replicateLedgerFragment(lh, ledgerFragment, targetBookie);
+                admin.replicateLedgerFragment(lh, ledgerFragment, null);
             } catch (BKException.BKBookieHandleNotAvailableException e) {
                 LOG.warn("BKBookieHandleNotAvailableException "
                         + "while replicating the fragment", e);
             } catch (BKException.BKLedgerRecoveryException e) {
                 LOG.warn("BKLedgerRecoveryException "
                         + "while replicating the fragment", e);
-                if (admin.getReadOnlyBookies().contains(targetBookie)) {
-                    underreplicationManager.releaseUnderreplicatedLedger(ledgerIdToReplicate);
-                    throw new BKException.BKWriteOnReadOnlyBookieException();
-                }
+            } catch (BKException.BKNotEnoughBookiesException e) {
+                LOG.warn("BKNotEnoughBookiesException "
+                        + "while replicating the fragment", e);
             }
         }
 
@@ -453,17 +426,6 @@ public class ReplicationWorker implements Runnable {
      */
     boolean isRunning() {
         return workerRunning && workerThread.isAlive();
-    }
-
-    private boolean isTargetBookieExistsInFragmentEnsemble(LedgerHandle lh,
-            LedgerFragment ledgerFragment) {
-        List<BookieSocketAddress> ensemble = ledgerFragment.getEnsemble();
-        for (BookieSocketAddress bkAddr : ensemble) {
-            if (targetBookie.equals(bkAddr)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /** Ledger checker call back */

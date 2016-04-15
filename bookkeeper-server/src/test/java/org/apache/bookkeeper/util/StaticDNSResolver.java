@@ -23,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import org.apache.bookkeeper.net.AbstractDNSToSwitchMapping;
+import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.net.DNSToSwitchMapping;
 import org.apache.bookkeeper.net.NetworkTopology;
 import org.slf4j.Logger;
@@ -35,17 +36,17 @@ public class StaticDNSResolver extends AbstractDNSToSwitchMapping {
 
     static final Logger LOG = LoggerFactory.getLogger(StaticDNSResolver.class);
 
-    private static final ConcurrentMap<String, String> name2Racks = new ConcurrentHashMap<String, String>();
+    private static final ConcurrentMap<BookieSocketAddress, String> name2Racks = new ConcurrentHashMap<BookieSocketAddress, String>();
 
-    public static void addNodeToRack(String name, String rack) {
-        name2Racks.put(name, rack);
+    public static void addNodeToRack(BookieSocketAddress bookieAddress, String rack) {
+        name2Racks.put(bookieAddress, rack);
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Add node {} to rack {}.", name, rack);
+            LOG.debug("Add node {} to rack {}.", bookieAddress, rack);
         }
     }
 
-    public static String getRack(String name) {
-        String rack = name2Racks.get(name);
+    public static String getRack(BookieSocketAddress bookieAddress) {
+        String rack = name2Racks.get(bookieAddress);
         if (null == rack) {
             rack = NetworkTopology.DEFAULT_RACK;
         }
@@ -57,15 +58,15 @@ public class StaticDNSResolver extends AbstractDNSToSwitchMapping {
     }
 
     @Override
-    public List<String> resolve(List<String> names) {
+    public List<String> resolve(List<BookieSocketAddress> bookieAddressList) {
         List<String> racks = new ArrayList<String>();
-        for (String n : names) {
-            String rack = name2Racks.get(n);
+        for (BookieSocketAddress bookieAddress : bookieAddressList) {
+            String rack = name2Racks.get(bookieAddress);
             if (null == rack) {
                 rack = NetworkTopology.DEFAULT_RACK;
             }
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Resolve name {} to rack {}.", n, rack);
+                LOG.debug("Resolve name {} to rack {}.", bookieAddress, rack);
             }
             racks.add(rack);
         }

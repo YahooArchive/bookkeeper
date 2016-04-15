@@ -155,21 +155,21 @@ public final class ScriptBasedMapping extends CachedDNSToSwitchMapping {
         }
 
         @Override
-        public List<String> resolve(List<String> names) {
-            List<String> m = new ArrayList<String>(names.size());
+        public List<String> resolve(List<BookieSocketAddress> bookieAddressList) {
+            List<String> m = new ArrayList<String>(bookieAddressList.size());
 
-            if (names.isEmpty()) {
+            if (bookieAddressList.isEmpty()) {
                 return m;
             }
 
             if (scriptName == null) {
-                for (int i = 0; i < names.size(); i++) {
+                for (int i = 0; i < bookieAddressList.size(); i++) {
                     m.add(NetworkTopology.DEFAULT_RACK);
                 }
                 return m;
             }
 
-            String output = runResolveCommand(names);
+            String output = runResolveCommand(bookieAddressList);
             if (output != null) {
                 StringTokenizer allSwitchInfo = new StringTokenizer(output);
                 while (allSwitchInfo.hasMoreTokens()) {
@@ -177,10 +177,10 @@ public final class ScriptBasedMapping extends CachedDNSToSwitchMapping {
                     m.add(switchInfo);
                 }
 
-                if (m.size() != names.size()) {
+                if (m.size() != bookieAddressList.size()) {
                     // invalid number of entries returned by the script
                     LOG.error("Script " + scriptName + " returned " + Integer.toString(m.size()) + " values when "
-                            + Integer.toString(names.size()) + " were expected.");
+                            + Integer.toString(bookieAddressList.size()) + " were expected.");
                     return null;
                 }
             } else {
@@ -200,7 +200,7 @@ public final class ScriptBasedMapping extends CachedDNSToSwitchMapping {
          * @return null if the number of arguments is out of range,
          * or the output of the command.
          */
-        private String runResolveCommand(List<String> args) {
+        private String runResolveCommand(List<BookieSocketAddress> args) {
             int loopCount = 0;
             if (args.size() == 0) {
                 return null;
@@ -220,7 +220,7 @@ public final class ScriptBasedMapping extends CachedDNSToSwitchMapping {
                 for (numProcessed = start;
                      numProcessed < (start + maxArgs) && numProcessed < args.size();
                      numProcessed++) {
-                    cmdList.add(args.get(numProcessed));
+                    cmdList.add(args.get(numProcessed).getSocketAddress().getAddress().getHostAddress());
                 }
                 File dir = null;
                 String userDir;

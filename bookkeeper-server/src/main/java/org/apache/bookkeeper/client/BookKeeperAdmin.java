@@ -24,20 +24,21 @@ import static com.google.common.base.Charsets.UTF_8;
 import static com.google.common.base.Preconditions.checkArgument;
 
 import java.io.IOException;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 
 import org.apache.bookkeeper.client.AsyncCallback.OpenCallback;
 import org.apache.bookkeeper.client.AsyncCallback.RecoverCallback;
+import org.apache.bookkeeper.client.BKException.BKNotEnoughBookiesException;
 import org.apache.bookkeeper.client.BookKeeper.SyncOpenCallback;
 import org.apache.bookkeeper.client.LedgerFragmentReplicator.SingleFragmentCallback;
 import org.apache.bookkeeper.conf.ClientConfiguration;
@@ -78,11 +79,8 @@ public class BookKeeperAdmin {
     // LedgerFragmentReplicator instance
     private LedgerFragmentReplicator lfr;
 
-    /*
-     * Random number generator used to choose an available bookie server to
-     * replicate data from a dead bookie.
-     */
-    private Random rand = new Random();
+    // Ensemble placement policy
+    private final EnsemblePlacementPolicy ensemblePlacementPolicy;
 
     /**
      * Constructor that takes in a ZooKeeper servers connect string so we know
@@ -138,6 +136,8 @@ public class BookKeeperAdmin {
         ownsBK = true;
 
         this.lfr = new LedgerFragmentReplicator(bkc);
+
+        this.ensemblePlacementPolicy = bkc.getEnsemblePlacementPolicy();
     }
 
     /**
@@ -154,6 +154,7 @@ public class BookKeeperAdmin {
         ownsZK = false;
         this.bookiesPath = bkc.getConf().getZkAvailableBookiesPath();
         this.lfr = new LedgerFragmentReplicator(bkc);
+        this.ensemblePlacementPolicy = bkc.getEnsemblePlacementPolicy();
     }
 
     /**
@@ -518,70 +519,11 @@ public class BookKeeperAdmin {
                     cb.recoverComplete(BKException.Code.ZKException, context);
                     return;
                 }
-                getAvailableBookies(bookieSrc, bookieDest, cb, context);
+                getActiveLedgers(bookieSrc, bookieDest, cb, context);
             }
 
             ;
         }, null);
-    }
-
-    /**
-     * This method asynchronously gets the set of available Bookies that the
-     * dead input bookie's data will be copied over into. If the user passed in
-     * a specific destination bookie, then just use that one. Otherwise, we'll
-     * randomly pick one of the other available bookies to use for each ledger
-     * fragment we are replicating.
-     *
-     * @param bookieSrc
-     *            Source bookie that had a failure. We want to replicate the
-     *            ledger fragments that were stored there.
-     * @param bookieDest
-     *            Optional destination bookie that if passed, we will copy all
-     *            of the ledger fragments from the source bookie over to it.
-     * @param cb
-     *            RecoverCallback to invoke once all of the data on the dead
-     *            bookie has been recovered and replicated.
-     * @param context
-     *            Context for the RecoverCallback to call.
-     */
-    private void getAvailableBookies(final BookieSocketAddress bookieSrc, final BookieSocketAddress bookieDest,
-                                     final RecoverCallback cb, final Object context) {
-        final List<BookieSocketAddress> availableBookies = new LinkedList<BookieSocketAddress>();
-        if (bookieDest != null) {
-            availableBookies.add(bookieDest);
-            // Now poll ZK to get the active ledgers
-            getActiveLedgers(bookieSrc, bookieDest, cb, context, availableBookies);
-        } else {
-            zk.getChildren(bookiesPath, null, new AsyncCallback.ChildrenCallback() {
-                @Override
-                public void processResult(int rc, String path, Object ctx, List<String> children) {
-                    if (rc != Code.OK.intValue()) {
-                        LOG.error("ZK error getting bookie nodes: ", KeeperException.create(KeeperException.Code
-                                  .get(rc), path));
-                        cb.recoverComplete(BKException.Code.ZKException, context);
-                        return;
-                    }
-                    for (String bookieNode : children) {
-                        if (BookKeeperConstants.READONLY
-                                        .equals(bookieNode)) {
-                            // exclude the readonly node from available bookies.
-                            continue;
-                        }
-                        BookieSocketAddress addr;
-                        try {
-                            addr = new BookieSocketAddress(bookieNode);
-                        } catch (UnknownHostException nhe) {
-                            LOG.error("Bookie Node retrieved from ZK has invalid name format: " + bookieNode);
-                            cb.recoverComplete(BKException.Code.ZKException, context);
-                            return;
-                        }
-                        availableBookies.add(addr);
-                    }
-                    // Now poll ZK to get the active ledgers
-                    getActiveLedgers(bookieSrc, null, cb, context, availableBookies);
-                }
-            }, null);
-        }
     }
 
     /**
@@ -608,7 +550,7 @@ public class BookKeeperAdmin {
      *            server to replicate data to.
      */
     private void getActiveLedgers(final BookieSocketAddress bookieSrc, final BookieSocketAddress bookieDest,
-            final RecoverCallback cb, final Object context, final List<BookieSocketAddress> availableBookies) {
+            final RecoverCallback cb, final Object context) {
         // Wrapper class around the RecoverCallback so it can be used
         // as the final VoidCallback to process ledgers
         class RecoverCallbackWrapper implements AsyncCallback.VoidCallback {
@@ -627,7 +569,7 @@ public class BookKeeperAdmin {
         Processor<Long> ledgerProcessor = new Processor<Long>() {
             @Override
             public void process(Long ledgerId, AsyncCallback.VoidCallback iterCallback) {
-                recoverLedger(bookieSrc, ledgerId, iterCallback, availableBookies);
+                recoverLedger(bookieSrc, bookieDest, ledgerId, iterCallback);
             }
         };
         bkc.getLedgerManager().asyncProcessLedgers(
@@ -635,20 +577,16 @@ public class BookKeeperAdmin {
                 context, BKException.Code.OK, BKException.Code.LedgerRecoveryException);
     }
 
-    /**
-     * Get a new random bookie, but ensure that it isn't one that is already
-     * in the ensemble for the ledger.
-     */
-    private BookieSocketAddress getNewBookie(final List<BookieSocketAddress> bookiesAlreadyInEnsemble,
-            final List<BookieSocketAddress> availableBookies)
-            throws BKException.BKNotEnoughBookiesException {
-        ArrayList<BookieSocketAddress> candidates = new ArrayList<BookieSocketAddress>();
-        candidates.addAll(availableBookies);
-        candidates.removeAll(bookiesAlreadyInEnsemble);
-        if (candidates.size() == 0) {
-            throw new BKException.BKNotEnoughBookiesException();
+    private BookieSocketAddress getReplacedBookie(LedgerFragment ledgerFragment) throws BKNotEnoughBookiesException {
+        Set<BookieSocketAddress> currentEnsemble = new HashSet<BookieSocketAddress>();
+        currentEnsemble.addAll(ledgerFragment.getEnsemble());
+        BookieSocketAddress targetBookieAddress = ensemblePlacementPolicy.replaceBookie(ledgerFragment.getAddress(),
+                currentEnsemble, new HashSet<BookieSocketAddress>());
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("The failed bookie {} will be replaced by new bookie {}", ledgerFragment.getAddress(),
+                    targetBookieAddress);
         }
-        return candidates.get(rand.nextInt(candidates.size()));
+        return targetBookieAddress;
     }
 
     /**
@@ -658,19 +596,19 @@ public class BookKeeperAdmin {
      * @param bookieSrc
      *            Source bookie that had a failure. We want to replicate the
      *            ledger fragments that were stored there.
+     * @param bookieDest
+     *            Destination bookie, to where entries from the ledger
+     *            fragment should be replicated.
+     *            If null, a destination bookie will be chosen from the cluster based
+     *            on the ensemble placement policy.
      * @param lId
      *            Ledger id we want to recover.
      * @param ledgerIterCb
      *            IterationCallback to invoke once we've recovered the current
      *            ledger.
-     * @param availableBookies
-     *            List of Bookie Servers that are available to use for
-     *            replicating data on the failed bookie. This could contain a
-     *            single bookie server if the user explicitly chose a bookie
-     *            server to replicate data to.
      */
-    private void recoverLedger(final BookieSocketAddress bookieSrc, final long lId,
-            final AsyncCallback.VoidCallback ledgerIterCb, final List<BookieSocketAddress> availableBookies) {
+    private void recoverLedger(final BookieSocketAddress bookieSrc, final BookieSocketAddress bookieDest,
+            final long lId, final AsyncCallback.VoidCallback ledgerIterCb) {
         LOG.debug("Recovering ledger : {}", lId);
 
         asyncOpenLedgerNoRecovery(lId, new OpenCallback() {
@@ -707,7 +645,7 @@ public class BookKeeperAdmin {
                                     return;
                                 }
                                 // do recovery
-                                recoverLedger(bookieSrc, lId, ledgerIterCb, availableBookies);
+                                recoverLedger(bookieSrc, bookieDest, lId, ledgerIterCb);
                             }
                         }, null);
                         return;
@@ -772,10 +710,22 @@ public class BookKeeperAdmin {
                  */
                 for (final Long startEntryId : ledgerFragmentsToRecover) {
                     Long endEntryId = ledgerFragmentsRange.get(startEntryId);
-                    BookieSocketAddress newBookie = null;
+                    ArrayList<BookieSocketAddress> currentEnsemble = lh.getLedgerMetadata().getEnsemble(startEntryId);
+                    int bookieIndex = -1;
+                    if (null != currentEnsemble) {
+                        for (int i = 0; i < currentEnsemble.size(); i++) {
+                            if (currentEnsemble.get(i).equals(bookieSrc)) {
+                                bookieIndex = i;
+                                break;
+                            }
+                        }
+                    }
+                    LedgerFragment ledgerFragment = new LedgerFragment(lh, startEntryId, endEntryId, bookieIndex);
+                    BookieSocketAddress newBookie = bookieDest;
                     try {
-                        newBookie = getNewBookie(lh.getLedgerMetadata().getEnsembles().get(startEntryId),
-                                                 availableBookies);
+                        if (newBookie == null) {
+                            newBookie = getReplacedBookie(ledgerFragment);
+                        }
                     } catch (BKException.BKNotEnoughBookiesException bke) {
                         ledgerFragmentsMcb.processResult(BKException.Code.NotEnoughBookiesException,
                                                          null, null);
@@ -789,20 +739,7 @@ public class BookKeeperAdmin {
                     }
                     try {
                         LedgerFragmentReplicator.SingleFragmentCallback cb = new LedgerFragmentReplicator.SingleFragmentCallback(
-                                                                               ledgerFragmentsMcb, lh, startEntryId, bookieSrc, newBookie);
-                        ArrayList<BookieSocketAddress> currentEnsemble = lh.getLedgerMetadata().getEnsemble(
-                                startEntryId);
-                        int bookieIndex = -1;
-                        if (null != currentEnsemble) {
-                            for (int i = 0; i < currentEnsemble.size(); i++) {
-                                if (currentEnsemble.get(i).equals(bookieSrc)) {
-                                    bookieIndex = i;
-                                    break;
-                                }
-                            }
-                        }
-                        LedgerFragment ledgerFragment = new LedgerFragment(lh,
-                                startEntryId, endEntryId, bookieIndex);
+                                ledgerFragmentsMcb, lh, startEntryId, bookieSrc, newBookie);
                         asyncRecoverLedgerFragment(lh, ledgerFragment, cb, newBookie);
                     } catch(InterruptedException e) {
                         Thread.currentThread().interrupt();
@@ -845,19 +782,26 @@ public class BookKeeperAdmin {
      * @param ledgerFragment
      *            - LedgerFragment to replicate
      * @param targetBookieAddress
-     *            - target Bookie, to where entries should be replicated.
+     *            - target Bookie, to where entries from the ledger
+     *            fragment should be replicated.
+     *            If null, a target bookie will be chosen from the cluster based
+     *            on the ensemble placement policy.
      */
     public void replicateLedgerFragment(LedgerHandle lh,
             final LedgerFragment ledgerFragment,
             final BookieSocketAddress targetBookieAddress)
             throws InterruptedException, BKException {
+        BookieSocketAddress newBookie = targetBookieAddress;
+        if (newBookie == null) {
+            newBookie = getReplacedBookie(ledgerFragment);
+        }
         SyncCounter syncCounter = new SyncCounter();
         ResultCallBack resultCallBack = new ResultCallBack(syncCounter);
         SingleFragmentCallback cb = new SingleFragmentCallback(resultCallBack,
                 lh, ledgerFragment.getFirstEntryId(), ledgerFragment
-                        .getAddress(), targetBookieAddress);
+                        .getAddress(), newBookie);
         syncCounter.inc();
-        asyncRecoverLedgerFragment(lh, ledgerFragment, cb, targetBookieAddress);
+        asyncRecoverLedgerFragment(lh, ledgerFragment, cb, newBookie);
         syncCounter.block(0);
         if (syncCounter.getrc() != BKException.Code.OK) {
             throw BKException.create(bkc.getReturnRc(syncCounter.getrc()));

@@ -48,9 +48,10 @@ public class TestRackawareEnsemblePlacementPolicy {
     @Before
     public void setUp() throws Exception {
         StaticDNSResolver.reset();
-        StaticDNSResolver.addNodeToRack(InetAddress.getLocalHost().getHostAddress(), NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack("127.0.0.1", NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack("localhost", NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(new BookieSocketAddress(InetAddress.getLocalHost().getHostAddress(), 0),
+                NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(new BookieSocketAddress("127.0.0.1", 0), NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(new BookieSocketAddress("localhost", 0), NetworkTopology.DEFAULT_RACK);
         LOG.info("Set up static DNS Resolver.");
         conf.setProperty(REPP_DNS_RESOLVER_CLASS, StaticDNSResolver.class.getName());
         repp = new RackawareEnsemblePlacementPolicy();
@@ -69,11 +70,11 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
         BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
+        StaticDNSResolver.addNodeToRack(addr1,
                 NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r3");
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r2");
+        StaticDNSResolver.addNodeToRack(addr4, "/r3");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -82,7 +83,12 @@ public class TestRackawareEnsemblePlacementPolicy {
         addrs.add(addr4);
         repp.onClusterChanged(addrs, new HashSet<BookieSocketAddress>());
         // replace node under r2
-        BookieSocketAddress replacedBookie = repp.replaceBookie(addr2, new HashSet<BookieSocketAddress>());
+        Set<BookieSocketAddress> ensembleBookies = new HashSet<BookieSocketAddress>();
+        ensembleBookies.add(addr1);
+        ensembleBookies.add(addr2);
+        ensembleBookies.add(addr4);
+        BookieSocketAddress replacedBookie = repp.replaceBookie(addr2, ensembleBookies,
+                new HashSet<BookieSocketAddress>());
         assertEquals(addr3, replacedBookie);
     }
 
@@ -93,11 +99,10 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
         BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r3");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r4");
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r3");
+        StaticDNSResolver.addNodeToRack(addr4, "/r4");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -108,10 +113,13 @@ public class TestRackawareEnsemblePlacementPolicy {
         // replace node under r2
         Set<BookieSocketAddress> excludedAddrs = new HashSet<BookieSocketAddress>();
         excludedAddrs.add(addr1);
-        BookieSocketAddress replacedBookie = repp.replaceBookie(addr2, excludedAddrs);
+        Set<BookieSocketAddress> ensembleBookies = new HashSet<BookieSocketAddress>();
+        ensembleBookies.add(addr4);
+        ensembleBookies.add(addr2);
+        BookieSocketAddress replacedBookie = repp.replaceBookie(addr2, ensembleBookies, excludedAddrs);
 
         assertFalse(addr1.equals(replacedBookie));
-        assertTrue(addr3.equals(replacedBookie) || addr4.equals(replacedBookie));
+        assertEquals(addr3, replacedBookie);
     }
 
     @Test(timeout = 60000)
@@ -121,11 +129,10 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
         BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r3");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r4");
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r3");
+        StaticDNSResolver.addNodeToRack(addr4, "/r4");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -139,11 +146,38 @@ public class TestRackawareEnsemblePlacementPolicy {
         excludedAddrs.add(addr3);
         excludedAddrs.add(addr4);
         try {
-            repp.replaceBookie(addr2, excludedAddrs);
+            repp.replaceBookie(addr2, new HashSet<BookieSocketAddress>(), excludedAddrs);
             fail("Should throw BKNotEnoughBookiesException when there is not enough bookies");
         } catch (BKNotEnoughBookiesException bnebe) {
             // should throw not enou
         }
+    }
+
+    @Test(timeout = 60000)
+    public void testReplaceBookieWithEnoughBookiesInSameRackAsEnsemble() throws Exception {
+        BookieSocketAddress addr1 = new BookieSocketAddress("127.0.0.1", 3181);
+        BookieSocketAddress addr2 = new BookieSocketAddress("127.0.0.2", 3181);
+        BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
+        BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
+        // update dns mapping
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r2");
+        StaticDNSResolver.addNodeToRack(addr4, "/r3");
+        // Update cluster
+        Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
+        addrs.add(addr1);
+        addrs.add(addr2);
+        addrs.add(addr3);
+        addrs.add(addr4);
+        repp.onClusterChanged(addrs, new HashSet<BookieSocketAddress>());
+        // replace node under r2
+        Set<BookieSocketAddress> ensembleBookies = new HashSet<BookieSocketAddress>();
+        ensembleBookies.add(addr2);
+        ensembleBookies.add(addr4);
+        BookieSocketAddress replacedBookie = repp.replaceBookie(addr4, ensembleBookies,
+                new HashSet<BookieSocketAddress>());
+        assertEquals(addr1, replacedBookie);
     }
 
     @Test(timeout = 60000)
@@ -176,11 +210,10 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
         BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r2");
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r2");
+        StaticDNSResolver.addNodeToRack(addr4, "/r2");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -211,16 +244,14 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr7 = new BookieSocketAddress("127.0.0.7", 3181);
         BookieSocketAddress addr8 = new BookieSocketAddress("127.0.0.8", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r3");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r4");
-        StaticDNSResolver.addNodeToRack(addr5.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr6.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr7.getSocketAddress().getAddress().getHostAddress(), "/r3");
-        StaticDNSResolver.addNodeToRack(addr8.getSocketAddress().getAddress().getHostAddress(), "/r4");
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r3");
+        StaticDNSResolver.addNodeToRack(addr4, "/r4");
+        StaticDNSResolver.addNodeToRack(addr5, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr6, "/r2");
+        StaticDNSResolver.addNodeToRack(addr7, "/r3");
+        StaticDNSResolver.addNodeToRack(addr8, "/r4");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -252,11 +283,10 @@ public class TestRackawareEnsemblePlacementPolicy {
         BookieSocketAddress addr3 = new BookieSocketAddress("127.0.0.3", 3181);
         BookieSocketAddress addr4 = new BookieSocketAddress("127.0.0.4", 3181);
         // update dns mapping
-        StaticDNSResolver.addNodeToRack(addr1.getSocketAddress().getAddress().getHostAddress(),
-                NetworkTopology.DEFAULT_RACK);
-        StaticDNSResolver.addNodeToRack(addr2.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr3.getSocketAddress().getAddress().getHostAddress(), "/r2");
-        StaticDNSResolver.addNodeToRack(addr4.getSocketAddress().getAddress().getHostAddress(), "/r3");
+        StaticDNSResolver.addNodeToRack(addr1, NetworkTopology.DEFAULT_RACK);
+        StaticDNSResolver.addNodeToRack(addr2, "/r2");
+        StaticDNSResolver.addNodeToRack(addr3, "/r2");
+        StaticDNSResolver.addNodeToRack(addr4, "/r3");
         // Update cluster
         Set<BookieSocketAddress> addrs = new HashSet<BookieSocketAddress>();
         addrs.add(addr1);
@@ -277,7 +307,7 @@ public class TestRackawareEnsemblePlacementPolicy {
             for (int j = 0; j < writeQuorumSize; j++) {
                 int bookieIdx = (i + j) % ensembleSize;
                 BookieSocketAddress addr = ensemble.get(bookieIdx);
-                racks.add(StaticDNSResolver.getRack(addr.getSocketAddress().getAddress().getHostAddress()));
+                racks.add(StaticDNSResolver.getRack(addr));
             }
             numCoveredWriteQuorums += (racks.size() > 1 ? 1 : 0);
         }

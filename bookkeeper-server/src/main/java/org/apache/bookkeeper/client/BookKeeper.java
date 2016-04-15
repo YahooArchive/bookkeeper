@@ -267,7 +267,7 @@ public class BookKeeper {
     }
 
     /**
-     * Contructor for use with the builder. Other constructors also use it.
+     * Constructor for use with the builder. Other constructors also use it.
      */
     private BookKeeper(ClientConfiguration conf, ZooKeeper zk,
                        EventLoopGroup eventLoopGroup, StatsLogger statsLogger)
@@ -378,6 +378,10 @@ public class BookKeeper {
      */
     BookieClient getBookieClient() {
         return bookieClient;
+    }
+
+    EnsemblePlacementPolicy getEnsemblePlacementPolicy() {
+        return placementPolicy;
     }
 
     /**

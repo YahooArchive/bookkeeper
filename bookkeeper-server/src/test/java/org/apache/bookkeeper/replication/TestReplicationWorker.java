@@ -127,7 +127,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
                 .getLocalHost().getHostAddress(), startNewBookie);
         LOG.info("New Bookie addr :" + newBkAddr);
 
-        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf, newBkAddr);
+        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf);
 
         rw.start();
         try {
@@ -174,7 +174,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
         LOG.info("New Bookie addr :" + newBkAddr);
 
         killAllBookies(lh, newBkAddr);
-        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf, newBkAddr);
+        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf);
 
         rw.start();
         try {
@@ -226,7 +226,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
         BookieSocketAddress newBkAddr1 = new BookieSocketAddress(InetAddress
                 .getLocalHost().getHostAddress(), startNewBookie1);
         LOG.info("New Bookie addr :" + newBkAddr1);
-        ReplicationWorker rw1 = new ReplicationWorker(zkc, baseConf, newBkAddr1);
+        ReplicationWorker rw1 = new ReplicationWorker(zkc, baseConf);
 
         // Starte RW2
         int startNewBookie2 = startNewBookie();
@@ -236,8 +236,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
         ZooKeeperWatcherBase w = new ZooKeeperWatcherBase(10000);
         ZooKeeper zkc1 = ZkUtils.createConnectedZookeeperClient(
                 zkUtil.getZooKeeperConnectString(), w);
-        ReplicationWorker rw2 = new ReplicationWorker(zkc1, baseConf,
-                newBkAddr2);
+        ReplicationWorker rw2 = new ReplicationWorker(zkc1, baseConf);
         rw1.start();
         rw2.start();
 
@@ -290,7 +289,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
         BookieSocketAddress newBkAddr = new BookieSocketAddress(InetAddress
                 .getLocalHost().getHostAddress(), startNewBookie);
         LOG.info("New Bookie addr :" + newBkAddr);
-        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf, newBkAddr);
+        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf);
         rw.start();
 
         try {
@@ -348,7 +347,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
                 .getLocalHost().getHostAddress(), startNewBookie);
         LOG.info("New Bookie addr :" + newBkAddr);
 
-        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf, newBkAddr);
+        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf);
 
         rw.start();
         try {
@@ -407,7 +406,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
 
         // set to 3s instead of default 30s
         baseConf.setOpenLedgerRereplicationGracePeriod("3000");
-        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf, newBkAddr);
+        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf);
 
         LedgerManagerFactory mFactory = LedgerManagerFactory
                 .newLedgerManagerFactory(baseClientConf, zkc);
@@ -468,7 +467,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
                 .getLocalHost().getHostAddress(), startNewBookie);
         LOG.info("New Bookie addr :" + newBkAddr);
 
-        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf, newBkAddr);
+        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf);
 
         LedgerManagerFactory mFactory = LedgerManagerFactory
                 .newLedgerManagerFactory(baseClientConf, zkc);
@@ -526,7 +525,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
         BookieSocketAddress newBkAddr = new BookieSocketAddress(InetAddress.getLocalHost().getHostAddress(), newBkPort);
         LOG.info("New Bookie addr :" + newBkAddr);
 
-        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf, newBkAddr);
+        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf);
 
         rw.start();
         try {
@@ -553,7 +552,7 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
                 zkUtil.getZooKeeperConnectString(), w);
 
         try {
-            ReplicationWorker rw = new ReplicationWorker(zk, baseConf, getBookie(0));
+            ReplicationWorker rw = new ReplicationWorker(zk, baseConf);
             rw.start();
             for (int i = 0; i < 10; i++) {
                 if (rw.isRunning()) {
@@ -593,11 +592,12 @@ public class TestReplicationWorker extends MultiLedgerManagerTestCase {
         for (int i = 0; i < 10; i++) {
             lh.addEntry(data);
         }
+        lh.close();
 
         BookieSocketAddress newBkAddr = new BookieSocketAddress(InetAddress.getLocalHost().getHostAddress(), newBkPort);
         LOG.info("New Bookie addr :" + newBkAddr);
 
-        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf, newBkAddr);
+        ReplicationWorker rw = new ReplicationWorker(zkc, baseConf);
 
         rw.start();
         try {

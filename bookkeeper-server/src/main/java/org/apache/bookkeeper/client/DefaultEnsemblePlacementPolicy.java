@@ -63,7 +63,9 @@ public class DefaultEnsemblePlacementPolicy implements EnsemblePlacementPolicy {
 
     @Override
     public BookieSocketAddress replaceBookie(BookieSocketAddress bookieToReplace,
-            Set<BookieSocketAddress> excludeBookies) throws BKNotEnoughBookiesException {
+            Set<BookieSocketAddress> currentEnsemble, Set<BookieSocketAddress> excludeBookies)
+            throws BKNotEnoughBookiesException {
+        excludeBookies.addAll(currentEnsemble);
         ArrayList<BookieSocketAddress> addresses = newEnsemble(1, 1, excludeBookies);
         return addresses.get(0);
     }

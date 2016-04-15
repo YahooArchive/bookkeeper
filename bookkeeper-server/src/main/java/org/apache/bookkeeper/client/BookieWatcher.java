@@ -49,7 +49,6 @@ import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.RemovalListener;
 import com.google.common.cache.RemovalNotification;
-import com.google.common.collect.Lists;
 
 /**
  * This class is responsible for maintaining a consistent view of what bookies
@@ -62,7 +61,7 @@ class BookieWatcher implements Watcher, ChildrenCallback {
     static final Logger logger = LoggerFactory.getLogger(BookieWatcher.class);
 
     public static int ZK_CONNECT_BACKOFF_SEC = 1;
-    private static final Set<BookieSocketAddress> EMPTY_SET = new HashSet<BookieSocketAddress>();
+
     private static final Boolean BOOLEAN = new Boolean(true);
 
     // Bookie registration path in ZK
@@ -261,12 +260,13 @@ class BookieWatcher implements Watcher, ChildrenCallback {
             throws BKNotEnoughBookiesException {
         try {
             // we try to only get from the healthy bookies first
-            return placementPolicy.newEnsemble(ensembleSize, writeQuorumSize, quarantinedBookies.asMap().keySet());
+            return placementPolicy.newEnsemble(ensembleSize, writeQuorumSize,
+                    new HashSet<BookieSocketAddress>(quarantinedBookies.asMap().keySet()));
         } catch (BKNotEnoughBookiesException e) {
             if (logger.isDebugEnabled()) {
                 logger.debug("Not enough healthy bookies available, using quarantined bookies");
             }
-            return placementPolicy.newEnsemble(ensembleSize, writeQuorumSize, EMPTY_SET);
+            return placementPolicy.newEnsemble(ensembleSize, writeQuorumSize, new HashSet<BookieSocketAddress>());
         }
     }
 
@@ -284,15 +284,16 @@ class BookieWatcher implements Watcher, ChildrenCallback {
         BookieSocketAddress addr = existingBookies.get(bookieIdx);
         try {
             // we exclude the quarantined bookies also first
-            List<BookieSocketAddress> existingAndQuarantinedBookies = Lists.newArrayList();
-            existingAndQuarantinedBookies.addAll(existingBookies);
+            Set<BookieSocketAddress> existingAndQuarantinedBookies = new HashSet<BookieSocketAddress>(existingBookies);
             existingAndQuarantinedBookies.addAll(quarantinedBookies.asMap().keySet());
-            return placementPolicy.replaceBookie(addr, new HashSet<BookieSocketAddress>(existingAndQuarantinedBookies));
+            return placementPolicy.replaceBookie(addr, new HashSet<BookieSocketAddress>(existingBookies),
+                    existingAndQuarantinedBookies);
         } catch (BKNotEnoughBookiesException e) {
             if (logger.isDebugEnabled()) {
                 logger.debug("Not enough healthy bookies available, using quarantined bookies");
             }
-            return placementPolicy.replaceBookie(addr, new HashSet<BookieSocketAddress>(existingBookies));
+            return placementPolicy.replaceBookie(addr, new HashSet<BookieSocketAddress>(existingBookies),
+                    new HashSet<BookieSocketAddress>(existingBookies));
         }
     }
 
