@@ -35,12 +35,12 @@ public class DbLedgerStorageTest {
     private DbLedgerStorage storage;
     private File tmpDir;
     private final boolean rocksDBEnabled;
-    
+
     @Parameters
     public static Collection<Object[]> configs() {
         return Arrays.asList(new Object[][] { { false }, { true } });
     }
-    
+
     public DbLedgerStorageTest(boolean rocksDBEnabled) {
         this.rocksDBEnabled = rocksDBEnabled;
     }
@@ -371,7 +371,7 @@ public class DbLedgerStorageTest {
 
         res = storage.getEntry(1, 1);
         assertEquals(entry1, res);
-        
+
         res = storage.getEntry(1, 2);
         assertEquals(entry2, res);
 
@@ -379,7 +379,7 @@ public class DbLedgerStorageTest {
 
         res = storage.getEntry(1, 1);
         assertEquals(entry1, res);
-        
+
         res = storage.getEntry(1, 2);
         assertEquals(entry2, res);
     }
@@ -425,5 +425,4 @@ public class DbLedgerStorageTest {
         assertEquals(entry0, storage.getEntry(1, 0));
         assertEquals(entry1, storage.getEntry(1, 1));
     }
-
 }

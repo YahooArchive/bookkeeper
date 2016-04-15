@@ -34,6 +34,7 @@ import java.io.FileFilter;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
@@ -47,6 +48,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -66,6 +68,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.MapMaker;
+import com.google.common.collect.Sets;
 
 /**
  * This class manages the writing of the bookkeeper entries. All the new
@@ -188,7 +191,7 @@ public class EntryLogger {
     /**
      * Scan entries in a entry log file.
      */
-    static interface EntryLogScanner {
+    public static interface EntryLogScanner {
         /**
          * Tests whether or not the entries belongs to the specified ledger
          * should be processed.
@@ -945,6 +948,29 @@ public class EntryLogger {
         return false;
     }
 
+    /**
+     * Returns a set with the ids of all the entry log files
+     * @throws IOException
+     */
+    public Set<Long> getEntryLogsSet() throws IOException {
+        Set<Long> entryLogs = Sets.newTreeSet();
+
+        final FilenameFilter logFileFilter = new FilenameFilter() {
+            @Override
+            public boolean accept(File dir, String name) {
+                return name.endsWith(".log");
+            }
+        };
+
+        for (File d : ledgerDirsManager.getAllLedgerDirs()) {
+            for (File f : d.listFiles(logFileFilter)) {
+                Long entryLogId = Long.parseLong(f.getName().split(".log")[0], 16);
+                entryLogs.add(entryLogId);
+            }
+        }
+        return entryLogs;
+    }
+
     private File findFile(long logId) throws FileNotFoundException {
         for (File d : ledgerDirsManager.getAllLedgerDirs()) {
             File f = new File(d, Long.toHexString(logId)+".log");
@@ -964,7 +990,7 @@ public class EntryLogger {
      *          Entry Log Scanner
      * @throws IOException
      */
-    protected void scanEntryLog(long entryLogId, EntryLogScanner scanner) throws IOException {
+    public void scanEntryLog(long entryLogId, EntryLogScanner scanner) throws IOException {
         ByteBuffer sizeBuff = ByteBuffer.allocate(4);
         ByteBuffer lidBuff = ByteBuffer.allocate(8);
         BufferedReadChannel bc;

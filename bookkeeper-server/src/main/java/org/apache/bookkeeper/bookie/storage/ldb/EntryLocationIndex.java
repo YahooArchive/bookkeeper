@@ -1,7 +1,5 @@
 package org.apache.bookkeeper.bookie.storage.ldb;
 
-import io.netty.util.internal.ConcurrentSet;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.FileSystems;
@@ -25,6 +23,8 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
+
+import io.netty.util.internal.ConcurrentSet;
 
 /**
  * Maintains an index of the entry locations in the EntryLogger.

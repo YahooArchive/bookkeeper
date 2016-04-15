@@ -49,6 +49,7 @@ import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageLevelDB;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageRocksDB;
+import org.apache.bookkeeper.bookie.storage.ldb.LocationsIndexRebuildOp;
 import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.BookKeeper;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
@@ -128,6 +129,7 @@ public class BookieShell implements Tool {
     static final String CMD_CONVERT_TO_DB_STORAGE = "convert-to-db-storage";
     static final String CMD_CONVERT_TO_INTERLEAVED_STORAGE = "convert-to-interleaved-storage";
     static final String CMD_CONVERT_ROCKSDB_TO_LEVELDB_STORAGE = "convert-rocksdb-to-leveldb-storage";
+    static final String CMD_REBUILD_DB_LEDGER_LOCATIONS_INDEX = "rebuild-db-ledger-locations-index";
     static final String CMD_HELP = "help";
 
     final ServerConfiguration bkConf = new ServerConfiguration();
@@ -1795,6 +1797,40 @@ public class BookieShell implements Tool {
         }
     }
 
+    /**
+     * Rebuild DbLedgerStorage locations index
+     */
+    class RebuildDbLedgerLocationsIndexCmd extends MyCommand {
+        Options opts = new Options();
+
+        public RebuildDbLedgerLocationsIndexCmd() {
+            super(CMD_REBUILD_DB_LEDGER_LOCATIONS_INDEX);
+        }
+
+        @Override
+        Options getOptions() {
+            return opts;
+        }
+
+        @Override
+        String getDescription() {
+            return "Rebuild DbLedgerStorage locations index by scanning the entry logs";
+        }
+
+        String getUsage() {
+            return CMD_REBUILD_DB_LEDGER_LOCATIONS_INDEX;
+        }
+
+        @Override
+        int runCmd(CommandLine cmdLine) throws Exception {
+            LOG.info("=== Rebuilding bookie index ===");
+            ServerConfiguration conf = new ServerConfiguration(bkConf);
+            new LocationsIndexRebuildOp(conf).initiate();
+            LOG.info("-- Done rebuilding bookie index --");
+            return 0;
+        }
+    }
+
     final Map<String, MyCommand> commands = new HashMap<String, MyCommand>();
     {
         commands.put(CMD_METAFORMAT, new MetaFormatCmd());
@@ -1818,6 +1854,7 @@ public class BookieShell implements Tool {
         commands.put(CMD_CONVERT_TO_DB_STORAGE, new ConvertToDbStorageCmd());
         commands.put(CMD_CONVERT_TO_INTERLEAVED_STORAGE, new ConvertToInterleavedStorageCmd());
         commands.put(CMD_CONVERT_ROCKSDB_TO_LEVELDB_STORAGE, new ConvertRocksDbToLevelDbCmd());
+        commands.put(CMD_REBUILD_DB_LEDGER_LOCATIONS_INDEX, new RebuildDbLedgerLocationsIndexCmd());
         commands.put(CMD_HELP, new HelpCmd());
     }
 
