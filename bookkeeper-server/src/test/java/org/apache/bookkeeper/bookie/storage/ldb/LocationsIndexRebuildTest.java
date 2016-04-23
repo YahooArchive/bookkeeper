@@ -1,5 +1,7 @@
 package org.apache.bookkeeper.bookie.storage.ldb;
 
+import static org.junit.Assert.assertEquals;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
@@ -23,6 +25,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 
 @RunWith(Parameterized.class)
@@ -106,6 +109,11 @@ public class LocationsIndexRebuildTest {
         for (long ledgerId = 0; ledgerId < 5; ledgerId++) {
             Assert.assertEquals(true, ledgerStorage.isFenced(ledgerId));
             Assert.assertEquals("ledger-" + ledgerId, new String(ledgerStorage.readMasterKey(ledgerId)));
+
+            ByteBuf lastEntry = ledgerStorage.getLastEntry(ledgerId);
+            assertEquals(ledgerId, lastEntry.readLong());
+            long lastEntryId = lastEntry.readLong();
+            assertEquals(99, lastEntryId);
 
             for (long entryId = 0; entryId < 100; entryId++) {
                 ByteBuf entry = Unpooled.buffer(1024);

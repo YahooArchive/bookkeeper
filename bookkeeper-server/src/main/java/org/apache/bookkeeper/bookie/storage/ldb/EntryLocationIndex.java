@@ -208,7 +208,10 @@ public class EntryLocationIndex implements Closeable {
             if (log.isDebugEnabled()) {
                 log.debug("Found last page in storage db for ledger {} : {}", ledgerId, ledgerIndexPage);
             }
-            return ledgerIndexPage.getLastEntry();
+
+            long lastEntryId = ledgerIndexPage.getLastEntry();
+            log.info("Found last entry id for ledger {} : {}", ledgerId, lastEntryId);
+            return lastEntryId;
         }
     }
 

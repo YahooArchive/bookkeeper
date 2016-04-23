@@ -33,7 +33,7 @@ public class LedgerIndexPage implements Entry<byte[], byte[]> {
         this.firstEntry = entries.get(0).first;
         this.lastEntry = entries.get(entries.size() - 1).first;
 
-        locationsTable = ByteBuffer.allocate(SIZE_OF_LONG * getNumberOfEntries());
+        locationsTable = ByteBuffer.allocate(SIZE_OF_LONG * (int) (lastEntry - firstEntry + 1));
         for (LongPair entry : entries) {
             long entryId = entry.first;
             long location = entry.second;
@@ -96,11 +96,20 @@ public class LedgerIndexPage implements Entry<byte[], byte[]> {
     }
 
     public long getLastEntry() {
-        return lastEntry;
+        for (long last = lastEntry; last >= 0; last--) {
+            int offset = (int) (last - firstEntry) * SIZE_OF_LONG;
+            if (locationsTable.getLong(offset) != 0) {
+                return last;
+            }
+        }
+
+        // It should never happen, because there will always be at least 1 entry in the page or the page would have
+        // never been written (and entries cannot be deleted). Anyway, returning -1 would mean the entry was found.
+        return -1;
     }
 
     public int getNumberOfEntries() {
-        return (int) (lastEntry - firstEntry + 1);
+        return (int) (getLastEntry() - firstEntry + 1);
     }
 
     @Override
