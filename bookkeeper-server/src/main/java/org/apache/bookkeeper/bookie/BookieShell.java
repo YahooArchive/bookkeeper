@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.SortedMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.bookkeeper.bookie.BookieException.InvalidCookieException;
@@ -66,11 +67,13 @@ import org.apache.bookkeeper.meta.LedgerManager.LedgerRangeIterator;
 import org.apache.bookkeeper.meta.LedgerManagerFactory;
 import org.apache.bookkeeper.meta.LedgerUnderreplicationManager;
 import org.apache.bookkeeper.net.BookieSocketAddress;
+import org.apache.bookkeeper.proto.BookieClient;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.replication.AuditorElector;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.util.EntryFormatter;
 import org.apache.bookkeeper.util.MathUtils;
+import org.apache.bookkeeper.util.OrderedSafeExecutor;
 import org.apache.bookkeeper.util.Tool;
 import org.apache.bookkeeper.util.ZkUtils;
 import org.apache.bookkeeper.versioning.Version;
@@ -98,6 +101,8 @@ import com.google.common.util.concurrent.AbstractFuture;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
 
 /**
  * Bookie Shell is to provide utilities for users to administer a bookkeeper cluster.
@@ -424,6 +429,7 @@ public class BookieShell implements Tool {
         ReadLedgerEntriesCmd() {
             super(CMD_READ_LEDGER_ENTRIES);
             lOpts.addOption("r", "force-recovery", false, "Ensure the ledger is properly closed before reading");
+            lOpts.addOption("b", "bookie", true, "Only read from a specific bookie");
         }
 
         @Override
@@ -438,7 +444,7 @@ public class BookieShell implements Tool {
 
         @Override
         String getUsage() {
-            return "readledger [-force-recovery] <ledger_id> [<start_entry_id> [<end_entry_id>]]";
+            return "readledger [-force-recovery] [-bookie <address:port>] <ledger_id> [<start_entry_id> [<end_entry_id>]]";
         }
 
         @Override
@@ -451,6 +457,11 @@ public class BookieShell implements Tool {
             }
 
             boolean forceRecovery = cmdLine.hasOption("r");
+            BookieSocketAddress bookie = null;
+            if (cmdLine.hasOption("b")) {
+                // A particular bookie was specified
+                bookie = new BookieSocketAddress(cmdLine.getOptionValue("b"));
+            }
 
             ClientConfiguration conf = new ClientConfiguration();
             conf.addConfiguration(bkConf);
@@ -480,13 +491,44 @@ public class BookieShell implements Tool {
                     }
                 }
 
-                Iterator<LedgerEntry> entries = bk.readEntries(ledgerId, firstEntry, lastEntry).iterator();
-                while (entries.hasNext()) {
-                    LedgerEntry entry = entries.next();
-                    ByteBuf data = entry.getEntryBuffer();
-                    System.out
-                            .println("Entry Id: " + entry.getEntryId() + ", Data: " + ByteBufUtil.prettyHexDump(data));
-                    data.release();
+                if (bookie == null) {
+                    // No bookie was specified, use normal bk client
+                    Iterator<LedgerEntry> entries = bk.readEntries(ledgerId, firstEntry, lastEntry).iterator();
+                    while (entries.hasNext()) {
+                        LedgerEntry entry = entries.next();
+                        ByteBuf data = entry.getEntryBuffer();
+                        System.out.println(
+                                "Entry Id: " + entry.getEntryId() + ", Data: " + ByteBufUtil.prettyHexDump(data));
+                        data.release();
+                    }
+                } else {
+                    // Use BookieClient to target a specific bookie
+                    EventLoopGroup eventLoopGroup = new NioEventLoopGroup();
+                    OrderedSafeExecutor executor = new OrderedSafeExecutor(2, "BookieClientScheduler");
+                    BookieClient bookieClient = new BookieClient(conf, eventLoopGroup, executor);
+
+                    for (long entryId = firstEntry; entryId < lastEntry; entryId++) {
+                        CompletableFuture<Void> future = new CompletableFuture<>();
+                        final long currentEntryId = entryId;
+                        bookieClient.readEntry(bookie, ledgerId, entryId, (rc, ledgerId1, entryId1, buffer, ctx) -> {
+                            if (rc != BKException.Code.OK) {
+                                LOG.error("Failed to read entry {} -- {}", entryId1, BKException.getMessage(rc));
+                                future.completeExceptionally(BKException.create(rc));
+                                return;
+                            }
+
+                            System.out.println(
+                                    "Entry Id: " + currentEntryId + ", Data: " + ByteBufUtil.prettyHexDump(buffer));
+                            buffer.release();
+                            future.complete(null);
+                        }, null, 0 );
+
+                        future.get();
+                    }
+
+                    eventLoopGroup.shutdownGracefully();
+                    executor.shutdown();
+                    bookieClient.close();
                 }
             } catch (NumberFormatException nfe) {
                 System.err.println("ERROR: invalid number " + nfe.getMessage());
