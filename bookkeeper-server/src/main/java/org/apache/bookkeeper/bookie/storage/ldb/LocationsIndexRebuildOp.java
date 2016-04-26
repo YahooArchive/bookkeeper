@@ -99,7 +99,7 @@ public class LocationsIndexRebuildOp {
                     entry.rewind();
 
                     // Actual location indexed is pointing past the entry size
-                    long location = offset + 4;
+                    long location =  (entryLogId << 32L) | (offset + 4);
 
                     if (LOG.isDebugEnabled()) {
                         LOG.debug("Rebuilding {}:{} at location {} / {}",
