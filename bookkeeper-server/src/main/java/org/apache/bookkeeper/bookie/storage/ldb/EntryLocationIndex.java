@@ -12,7 +12,9 @@ import org.apache.bookkeeper.bookie.Bookie.NoEntryException;
 import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactableLedgerStorage.EntryLocation;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.Batch;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageFactory.DbConfigType;
 import org.apache.bookkeeper.bookie.storage.ldb.SortedLruCache.Weighter;
+import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.stats.Gauge;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.slf4j.Logger;
@@ -87,10 +89,10 @@ public class EntryLocationIndex implements Closeable {
 
     private StatsLogger stats;
 
-    public EntryLocationIndex(KeyValueStorageFactory storageFactory, String basePath, StatsLogger stats,
+    public EntryLocationIndex(ServerConfiguration conf, KeyValueStorageFactory storageFactory, String basePath, StatsLogger stats,
             long entryLocationCacheMaxSize) throws IOException {
         String locationsDbPath = FileSystems.getDefault().getPath(basePath, "locations").toFile().toString();
-        locationsDb = storageFactory.newKeyValueStorage(locationsDbPath);
+        locationsDb = storageFactory.newKeyValueStorage(locationsDbPath, DbConfigType.Huge, conf);
 
         // Convert max memory size to max number of entries
         long maxNumberOfEntries = entryLocationCacheMaxSize / LedgerIndexPage.SIZE_OF_LONG;

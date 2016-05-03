@@ -48,6 +48,7 @@ import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorage;
 import org.apache.bookkeeper.bookie.storage.ldb.EntryLocationIndex;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageFactory.DbConfigType;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageLevelDB;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageRocksDB;
 import org.apache.bookkeeper.bookie.storage.ldb.LocationsIndexRebuildOp;
@@ -1693,7 +1694,7 @@ public class BookieShell implements Tool {
             String rocksDbledgersPath = fileSystem.getPath(baseDir, "ledgers").toFile().toString();
             String levelDbLedgersPath = fileSystem.getPath(baseDir, "ledgers.ldb").toFile().toString();
 
-            KeyValueStorage rocksDbLedgersStorage = new KeyValueStorageRocksDB(rocksDbledgersPath);
+            KeyValueStorage rocksDbLedgersStorage = new KeyValueStorageRocksDB(rocksDbledgersPath, DbConfigType.Small, bkConf);
             KeyValueStorage levelDbLedgersStorage = new KeyValueStorageLevelDB(levelDbLedgersPath);
 
             copyDatabase(rocksDbLedgersStorage, levelDbLedgersStorage);
@@ -1705,7 +1706,7 @@ public class BookieShell implements Tool {
             String rocksDbLocationsPath = fileSystem.getPath(baseDir, "locations").toFile().toString();
             String levelDbLocationsPath = fileSystem.getPath(baseDir, "locations.ldb").toFile().toString();
 
-            KeyValueStorage rocksDbLocationsStorage = new KeyValueStorageRocksDB(rocksDbLocationsPath);
+            KeyValueStorage rocksDbLocationsStorage = new KeyValueStorageRocksDB(rocksDbLocationsPath, DbConfigType.Huge, bkConf);
             KeyValueStorage levelDbLocationsStorage = new KeyValueStorageLevelDB(levelDbLocationsPath);
 
             copyDatabase(rocksDbLocationsStorage, levelDbLocationsStorage);

@@ -139,8 +139,8 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
         KeyValueStorageFactory storageFactory = rocksDBEnabled ? //
                 KeyValueStorageRocksDB.factory //
                 : KeyValueStorageLevelDB.factory;
-        ledgerIndex = new LedgerMetadataIndex(storageFactory, baseDir, stats);
-        entryLocationIndex = new EntryLocationIndex(storageFactory, baseDir, stats, entryLocationCacheMaxSize);
+        ledgerIndex = new LedgerMetadataIndex(conf, storageFactory, baseDir, stats);
+        entryLocationIndex = new EntryLocationIndex(conf, storageFactory, baseDir, stats, entryLocationCacheMaxSize);
 
         entryLogger = new EntryLogger(conf, ledgerDirsManager);
         gcThread = new GarbageCollectorThread(conf, ledgerManagerProvider, this);
