@@ -20,29 +20,32 @@
  */
 package org.apache.bookkeeper.bookie;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import org.apache.bookkeeper.bookie.EntryLogger.EntryLogScanner;
+import org.apache.bookkeeper.bookie.GarbageCollectorThread.CompactionScannerFactory;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
 import org.apache.bookkeeper.client.LedgerEntry;
 import org.apache.bookkeeper.client.LedgerHandle;
 import org.apache.bookkeeper.client.LedgerMetadata;
-import org.apache.bookkeeper.conf.TestBKConfiguration;
 import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.conf.TestBKConfiguration;
 import org.apache.bookkeeper.meta.LedgerManager;
-import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.LedgerMetadataListener;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.Processor;
+import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.test.BookKeeperClusterTestCase;
 import org.apache.bookkeeper.util.MathUtils;
 import org.apache.bookkeeper.util.TestUtils;
@@ -53,7 +56,8 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.junit.Assert.*;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 
 /**
  * This class tests the entry log compaction functionality.
@@ -101,6 +105,7 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         baseConf.setEntryLogSizeLimit(numEntries * ENTRY_SIZE);
         // Disable skip list for compaction
         baseConf.setGcWaitTime(gcWaitTime);
+        baseConf.setFlushInterval(100);
         baseConf.setMinorCompactionThreshold(minorCompactionThreshold);
         baseConf.setMajorCompactionThreshold(majorCompactionThreshold);
         baseConf.setMinorCompactionInterval(minorCompactionInterval);
@@ -577,5 +582,63 @@ public class CompactionTest extends BookKeeperClusterTestCase {
             bb.writeByte((byte)0xFF);
         }
         return bb;
+    }
+
+    @Test(timeout = 60000)
+    public void testCompactionWithEntryLogRollover() throws Exception {
+        // Disable bookie gc during this test
+        baseConf.setGcWaitTime(60000);
+        baseConf.setMinorCompactionInterval(0);
+        baseConf.setMajorCompactionInterval(0);
+        restartBookies();
+
+        // prepare data
+        LedgerHandle[] lhs = prepareData(3, false);
+
+        for (LedgerHandle lh : lhs) {
+            lh.close();
+        }
+
+        // remove ledger2 and ledger3
+        bkc.deleteLedger(lhs[1].getId());
+        bkc.deleteLedger(lhs[2].getId());
+        LOG.info("Finished deleting the ledgers contains most entries.");
+
+        InterleavedLedgerStorage ledgerStorage = (InterleavedLedgerStorage) bs.get(0).getBookie().ledgerStorage;
+        GarbageCollectorThread garbageCollectorThread = ledgerStorage.gcThread;
+        CompactionScannerFactory compactionScannerFactory = garbageCollectorThread.scannerFactory;
+        long entryLogId = 0;
+        EntryLogger entryLogger = ledgerStorage.entryLogger;
+
+        LOG.info("Before compaction -- Least unflushed log id: {}", entryLogger.getLeastUnflushedLogId());
+
+        // Compact entryLog 0
+        EntryLogScanner scanner = compactionScannerFactory.newScanner(entryLogger.getEntryLogMetadata(entryLogId));
+
+        entryLogger.scanEntryLog(entryLogId, scanner);
+
+        long entryLogIdAfterCompaction = entryLogger.getLeastUnflushedLogId();
+        LOG.info("After compaction -- Least unflushed log id: {}", entryLogIdAfterCompaction);
+
+        // Add more entries to trigger entrylog roll over
+        LedgerHandle[] lhs2 = prepareData(3, false);
+
+        for (LedgerHandle lh : lhs2) {
+            lh.close();
+        }
+
+        // Wait for entry logger to move forward
+        while (entryLogger.getLeastUnflushedLogId() <= entryLogIdAfterCompaction) {
+            Thread.sleep(100);
+        }
+
+        long entryLogIdBeforeFlushing = entryLogger.getLeastUnflushedLogId();
+        LOG.info("Added more data -- Least unflushed log id: {}", entryLogIdBeforeFlushing);
+
+        assertTrue(entryLogIdAfterCompaction < entryLogIdBeforeFlushing);
+
+        // Wait for entries to be flushed on entry logs and update index
+        // This operation should succeed even if the entry log rolls over after the last entry was compacted
+        compactionScannerFactory.flush();
     }
 }
