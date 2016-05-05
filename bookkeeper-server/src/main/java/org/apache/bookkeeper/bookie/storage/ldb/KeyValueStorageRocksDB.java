@@ -2,13 +2,21 @@ package org.apache.bookkeeper.bookie.storage.ldb;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import java.io.File;
 import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Map.Entry;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageFactory.DbConfigType;
 import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang.time.DurationFormatUtils;
 import org.rocksdb.BlockBasedTableConfig;
 import org.rocksdb.BloomFilter;
 import org.rocksdb.ChecksumType;
@@ -32,7 +40,10 @@ public class KeyValueStorageRocksDB implements KeyValueStorage {
         @Override
         public KeyValueStorage newKeyValueStorage(String path, DbConfigType dbConfigType, ServerConfiguration conf)
                 throws IOException {
-            return new KeyValueStorageRocksDB(path, dbConfigType, conf);
+            doUpgradeIfNeeded(path, dbConfigType, conf);
+            KeyValueStorageRocksDB db = new KeyValueStorageRocksDB(path, dbConfigType, conf);
+            doCreateRocksDbMarker(path);
+            return db;
         }
     };
 
@@ -42,6 +53,7 @@ public class KeyValueStorageRocksDB implements KeyValueStorage {
 
     private final ReadOptions Cache;
     private final ReadOptions DontCache;
+    private static final String ROCKSDB_MARKER = "rocksdb-enabled";
 
     private static final String ROCKSDB_LOG_LEVEL = "dbStorage_rocksDB_logLevel";
     private static final String ROCKSDB_WRITE_BUFFER_SIZE_MB = "dbStorage_rocksDB_writeBufferSizeMB";
@@ -339,6 +351,81 @@ public class KeyValueStorageRocksDB implements KeyValueStorage {
         @Override
         public byte[] getKey() {
             return key;
+        }
+    }
+
+    /**
+     * Checks whether the DB was already created with RocksDB, otherwise copy all data from one database into a fresh
+     * database.
+     *
+     * Useful when switching from LevelDB to RocksDB since it lets us to restart fresh and build a DB with the new
+     * settings (SSTs sizes, levels, etc..)
+     */
+    private static void doUpgradeIfNeeded(String path, DbConfigType dbConfigType, ServerConfiguration conf)
+            throws IOException {
+        FileSystem fileSystem = FileSystems.getDefault();
+        final Path rocksDbMarkerFile = fileSystem.getPath(path, ROCKSDB_MARKER);
+
+        if (Files.exists(fileSystem.getPath(path))) {
+            // Database already existing
+            if (Files.exists(rocksDbMarkerFile)) {
+                // Database was already created with RocksDB
+                return;
+            }
+        } else {
+            // Database not existing, no need to convert
+            return;
+        }
+
+        log.info("Converting existing database to RocksDB: {}", path);
+        long startTime = System.nanoTime();
+
+        String rocksDbPath = path + ".rocksdb";
+        KeyValueStorage source = new KeyValueStorageRocksDB(path, dbConfigType, conf);
+
+        log.info("Opened existing db, starting copy");
+        KeyValueStorage target = new KeyValueStorageRocksDB(rocksDbPath, dbConfigType, conf);
+
+        // Copy into new database. Write in batches to speed up the insertion
+        CloseableIterator<Entry<byte[], byte[]>> iterator = source.iterator();
+        try {
+            final int maxBatchSize = 10000;
+            int currentBatchSize = 0;
+            Batch batch = target.newBatch();
+
+            while (iterator.hasNext()) {
+                Entry<byte[], byte[]> entry = iterator.next();
+
+                batch.put(entry.getKey(), entry.getValue());
+                if (++currentBatchSize == maxBatchSize) {
+                    batch.flush();
+                    batch = target.newBatch();
+                    currentBatchSize = 0;
+                }
+            }
+
+            batch.flush();
+        } finally {
+            iterator.close();
+            source.close();
+            target.close();
+        }
+
+        FileUtils.deleteDirectory(new File(path));
+        Files.move(fileSystem.getPath(rocksDbPath), fileSystem.getPath(path));
+
+        // Create the marked to avoid conversion next time
+        Files.createFile(rocksDbMarkerFile);
+
+        log.info("Database conversion done. Total time: {}",
+                DurationFormatUtils.formatDurationHMS(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime)));
+    }
+
+    private static void doCreateRocksDbMarker(String path) throws IOException {
+        try {
+            Files.createFile(FileSystems.getDefault().getPath(path, ROCKSDB_MARKER));
+        } catch (FileAlreadyExistsException e) {
+            // Ignore
         }
     }
 
