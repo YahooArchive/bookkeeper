@@ -11,6 +11,7 @@ import java.util.List;
 
 import org.apache.bookkeeper.bookie.Bookie.NoEntryException;
 import org.apache.bookkeeper.bookie.storage.ldb.EntryLocationIndex.EntryRange;
+import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -25,16 +26,18 @@ import com.google.common.collect.Multimap;
 public class EntryLocationIndexTest {
 
     private final KeyValueStorageFactory storageFactory;
-    
+    private final ServerConfiguration serverConfiguration;
+
     @Parameters
     public static Collection<Object[]> configs() {
         return Arrays.asList(new Object[][] { {KeyValueStorageLevelDB.factory }, {KeyValueStorageRocksDB.factory}});
     }
-    
+
     public EntryLocationIndexTest(KeyValueStorageFactory storageFactory) {
         this.storageFactory = storageFactory;
+        this.serverConfiguration = new ServerConfiguration();
     }
-    
+
     @Test
     public void entryRangeTest() {
         EntryRange er = new EntryRange(1, 0, 10);
@@ -89,7 +92,7 @@ public class EntryLocationIndexTest {
         tmpDir.mkdir();
         tmpDir.deleteOnExit();
 
-        EntryLocationIndex idx = new EntryLocationIndex(storageFactory, tmpDir.getAbsolutePath(),
+        EntryLocationIndex idx = new EntryLocationIndex(serverConfiguration, storageFactory, tmpDir.getAbsolutePath(),
                 NullStatsLogger.INSTANCE, 1 * 1024);
 
         Multimap<Long, LongPair> locations = ArrayListMultimap.create();
@@ -148,7 +151,7 @@ public class EntryLocationIndexTest {
         tmpDir.mkdir();
         tmpDir.deleteOnExit();
 
-        EntryLocationIndex idx = new EntryLocationIndex(storageFactory, tmpDir.getAbsolutePath(),
+        EntryLocationIndex idx = new EntryLocationIndex(serverConfiguration, storageFactory, tmpDir.getAbsolutePath(),
                 NullStatsLogger.INSTANCE, 1 * 1024);
 
         Multimap<Long, LongPair> locations = ArrayListMultimap.create();

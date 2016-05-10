@@ -37,6 +37,7 @@ import org.apache.bookkeeper.bookie.EntryLogger;
 import org.apache.bookkeeper.bookie.EntryLogger.EntryLogScanner;
 import org.apache.bookkeeper.bookie.LedgerDirsManager;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.Batch;
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageFactory.DbConfigType;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.commons.lang.time.DurationFormatUtils;
@@ -79,10 +80,10 @@ public class LocationsIndexRebuildOp {
                 : KeyValueStorageLevelDB.factory;
         String locationsDbPath = FileSystems.getDefault().getPath(basePath, "locations").toFile().toString();
 
-        Set<Long> activeLedgers = getActiveLedgers(storageFactory, basePath);
+        Set<Long> activeLedgers = getActiveLedgers(conf, storageFactory, basePath);
         LOG.info("Found {} active ledgers in ledger manager", activeLedgers.size());
 
-        KeyValueStorage newIndex = storageFactory.newKeyValueStorage(locationsDbPath);
+        KeyValueStorage newIndex = storageFactory.newKeyValueStorage(locationsDbPath, DbConfigType.Huge, conf);
 
         int totalEntryLogs = entryLogs.size();
         int completedEntryLogs = 0;
@@ -161,8 +162,8 @@ public class LocationsIndexRebuildOp {
         return new LongPair(ledgerId, alignedEntryId);
     }
 
-    private Set<Long> getActiveLedgers(KeyValueStorageFactory storageFactory, String basePath) throws IOException {
-        LedgerMetadataIndex ledgers = new LedgerMetadataIndex(storageFactory, basePath, NullStatsLogger.INSTANCE);
+    private Set<Long> getActiveLedgers(ServerConfiguration conf, KeyValueStorageFactory storageFactory, String basePath) throws IOException {
+        LedgerMetadataIndex ledgers = new LedgerMetadataIndex(conf, storageFactory, basePath, NullStatsLogger.INSTANCE);
         Set<Long> activeLedgers = Sets.newHashSet();
         for (Long ledger : ledgers.getActiveLedgersInRange(0, Long.MAX_VALUE)) {
             activeLedgers.add(ledger);

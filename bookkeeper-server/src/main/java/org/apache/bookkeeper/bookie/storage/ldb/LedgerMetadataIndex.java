@@ -17,6 +17,8 @@ import org.apache.bookkeeper.bookie.BookieException;
 import org.apache.bookkeeper.bookie.storage.ldb.DbLedgerStorageDataFormats.LedgerData;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.Batch;
 import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorageFactory.DbConfigType;
+import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.stats.Gauge;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.util.ByteArrayUtil;
@@ -47,10 +49,10 @@ public class LedgerMetadataIndex implements Closeable {
     // Holds ledger ids that were delete from memory map, and pending to be flushed on db
     private final ConcurrentLinkedQueue<Long> pendingDeletedLedgers;
 
-    public LedgerMetadataIndex(KeyValueStorageFactory storageFactory, String basePath, StatsLogger stats)
+    public LedgerMetadataIndex(ServerConfiguration conf, KeyValueStorageFactory storageFactory, String basePath, StatsLogger stats)
             throws IOException {
         String ledgersPath = FileSystems.getDefault().getPath(basePath, "ledgers").toFile().toString();
-        ledgersDb = storageFactory.newKeyValueStorage(ledgersPath);
+        ledgersDb = storageFactory.newKeyValueStorage(ledgersPath, DbConfigType.Small, conf);
 
         ledgers = new ConcurrentLongHashMap<>();
         ledgersCount = new AtomicInteger();

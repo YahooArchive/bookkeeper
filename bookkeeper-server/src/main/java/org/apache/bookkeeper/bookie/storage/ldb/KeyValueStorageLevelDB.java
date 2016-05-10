@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.util.Comparator;
 import java.util.Map.Entry;
 
+import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.fusesource.leveldbjni.JniDBFactory;
 import org.iq80.leveldb.CompressionType;
 import org.iq80.leveldb.DB;
@@ -27,7 +28,7 @@ public class KeyValueStorageLevelDB implements KeyValueStorage {
 
     static KeyValueStorageFactory factory = new KeyValueStorageFactory() {
         @Override
-        public KeyValueStorage newKeyValueStorage(String path) throws IOException {
+        public KeyValueStorage newKeyValueStorage(String path, DbConfigType dbConfigType, ServerConfiguration conf) throws IOException {
             return new KeyValueStorageLevelDB(path);
         }
     };
