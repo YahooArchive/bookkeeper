@@ -4,6 +4,8 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.Map.Entry;
 
+import org.apache.bookkeeper.bookie.storage.ldb.KeyValueStorage.CloseableIterator;
+
 public interface KeyValueStorage extends Closeable {
 
     void put(byte[] key, byte[] value) throws IOException;
@@ -95,6 +97,16 @@ public interface KeyValueStorage extends Closeable {
      * Return an iterator object that can be used to sequentially scan through all the entries in the database
      */
     CloseableIterator<Entry<byte[], byte[]>> iterator();
+    
+    /**
+     * Return an iterator object that can be used to sequentially scan through all the entries in the database
+     * 
+     * @param firstKey
+     *            the first key to seek
+     * @param cacheable
+     *            if true, then fill-cache behavior will be performed
+     */
+    CloseableIterator<Entry<byte[], byte[]>> iterator(byte[] firstKey, boolean cacheable);
 
     /**
      * Commit all pending write to durable storage

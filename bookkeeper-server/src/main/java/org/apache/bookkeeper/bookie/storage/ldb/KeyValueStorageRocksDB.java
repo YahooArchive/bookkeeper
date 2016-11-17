@@ -329,11 +329,15 @@ public class KeyValueStorageRocksDB implements KeyValueStorage {
             }
         };
     }
-
+    
     @Override
-    public CloseableIterator<Entry<byte[], byte[]>> iterator() {
-        final RocksIterator iterator = db.newIterator(DontCache);
-        iterator.seekToFirst();
+    public CloseableIterator<Entry<byte[], byte[]>> iterator(byte[] firstKey, boolean cacheable) {
+        final RocksIterator iterator = db.newIterator(cacheable ? Cache : DontCache);
+        if (firstKey != null) {
+        	iterator.seek(firstKey);
+        } else {
+        	iterator.seekToFirst();
+        }
         final EntryWrapper entryWrapper = new EntryWrapper();
 
         return new CloseableIterator<Entry<byte[], byte[]>>() {
@@ -356,6 +360,11 @@ public class KeyValueStorageRocksDB implements KeyValueStorage {
                 iterator.dispose();
             }
         };
+    }
+
+    @Override
+    public CloseableIterator<Entry<byte[], byte[]>> iterator() {
+        return iterator(null, false);
     }
 
     @Override
