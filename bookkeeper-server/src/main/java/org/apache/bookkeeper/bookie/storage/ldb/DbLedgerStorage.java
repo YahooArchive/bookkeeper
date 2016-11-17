@@ -3,6 +3,7 @@ package org.apache.bookkeeper.bookie.storage.ldb;
 import static com.google.common.base.Preconditions.checkArgument;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.SortedMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -419,14 +420,15 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
             long entryLogId = firstEntryLocation >> 32;
             int count = 0;
             long size = 0;
-
-            while (count < readAheadCacheBatchSize) {
-                if (!readAheadCacheLimiter.tryAcquire(0, TimeUnit.NANOSECONDS)) {
+            
+            List<Long> locations = entryLocationIndex.getLocations(ledgerId, entryId, readAheadCacheBatchSize);
+            
+            for (Long nextEntryLocation : locations) {
+            	if (!readAheadCacheLimiter.tryAcquire(0, TimeUnit.NANOSECONDS)) {
                     // Giving up
                     return;
                 }
 
-                long nextEntryLocation = entryLocationIndex.getLocation(ledgerId, entryId);
                 long nextEntryLogId = nextEntryLocation >> 32;
                 if (nextEntryLocation == 0 || nextEntryLogId != entryLogId) {
                     // The entry is not in the bookie, or we have already moved to a different entry log file, stop read
@@ -436,6 +438,7 @@ public class DbLedgerStorage implements CompactableLedgerStorage {
 
                 ByteBuf content = entryLogger.readEntry(ledgerId, entryId, nextEntryLocation);
                 readCache.put(ledgerId, entryId, content);
+                
                 entryId++;
                 count++;
                 size += content.readableBytes();

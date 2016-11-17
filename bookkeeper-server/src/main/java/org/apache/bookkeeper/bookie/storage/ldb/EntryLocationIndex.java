@@ -8,6 +8,9 @@ import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -90,6 +93,34 @@ public class EntryLocationIndex implements Closeable {
         } finally {
             key.recycle();
             value.recycle();
+        }
+    }
+    
+    public List<Long> getLocations(long ledgerId, long startEntryId, int count) throws IOException {
+    	LongPairWrapper key = LongPairWrapper.get(ledgerId, startEntryId);
+    	CloseableIterator<Entry<byte[], byte[]>> it = null;
+    	try {
+    		List<Long> result = new ArrayList<Long>(count);
+    		it = locationsDb.iterator(key.array, true);
+    		while (it.hasNext()) {
+    			Entry<byte[], byte[]> entry = it.next();
+    			if (!Arrays.equals(key.array, entry.getKey())) {
+    				break;
+    			}
+    			result.add(ArrayUtil.getLong(entry.getValue(), 0));
+    			if (--count > 0) {
+    				key.set(ledgerId, ++startEntryId);
+    			} else {
+    				break;
+    			}
+    		}
+    		
+    		return result;
+        } finally {
+            key.recycle();
+            if (it != null) {
+            	it.close();
+            }
         }
     }
 
