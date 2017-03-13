@@ -3,7 +3,7 @@
   <groupId>org.apache.bookkeeper.stats</groupId>
   <artifactId>bookkeeper-stats-api</artifactId>
   <versioning>
-    <release>4.3.1.56-yahoo</release>
+    <release>4.3.1.57-yahoo</release>
     <versions>
       <version>4.3.1.27-yahoo</version>
       <version>4.3.1.28-yahoo</version>
@@ -30,7 +30,8 @@
       <version>4.3.1.54-yahoo</version>
       <version>4.3.1.55-yahoo</version>
       <version>4.3.1.56-yahoo</version>
+      <version>4.3.1.57-yahoo</version>
     </versions>
-    <lastUpdated>20170309213020</lastUpdated>
+    <lastUpdated>20170313220038</lastUpdated>
   </versioning>
 </metadata>
