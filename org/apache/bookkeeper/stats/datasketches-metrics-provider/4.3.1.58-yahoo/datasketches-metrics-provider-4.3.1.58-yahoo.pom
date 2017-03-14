@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<project
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"
+  xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.apache.bookkeeper</groupId>
+    <artifactId>bookkeeper-stats-providers</artifactId>
+    <version>4.3.1.58-yahoo</version>
+  </parent>
+
+  <groupId>org.apache.bookkeeper.stats</groupId>
+  <artifactId>datasketches-metrics-provider</artifactId>
+  <name>Stats provider for DataSketches metrics</name>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.apache.bookkeeper.stats</groupId>
+      <artifactId>bookkeeper-stats-api</artifactId>
+      <version>${project.parent.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.yahoo.datasketches</groupId>
+      <artifactId>sketches-core</artifactId>
+      <version>0.8.3</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>1.6.4</version>
+    </dependency>
+
+    <dependency>
+      <groupId>io.netty</groupId>
+      <artifactId>netty-common</artifactId>
+      <version>4.0.42.Final</version>
+    </dependency>
+  </dependencies>
+</project>
