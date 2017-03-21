@@ -457,7 +457,8 @@ public class RackawareEnsemblePlacementPolicy implements EnsemblePlacementPolicy
                 return addrs;
             }
             // pick nodes by racks, to ensure there is at least two racks per write quorum.
-            for (int i = 0; i < ensembleSize; i++) {
+            prevNode = selectRandom(1, excludeNodes, ensemble).get(0);
+            for (int i = 1; i < ensembleSize; i++) {
                 String curRack;
                 if (null == prevNode) {
                     if (null == localNode) {
