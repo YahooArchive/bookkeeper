@@ -3,7 +3,7 @@
   <groupId>org.apache.bookkeeper.stats</groupId>
   <artifactId>prometheus-metrics-provider</artifactId>
   <versioning>
-    <release>4.3.1.74-yahoo</release>
+    <release>4.3.1.75-yahoo</release>
     <versions>
       <version>4.3.1.68-yahoo</version>
       <version>4.3.1.69-yahoo</version>
@@ -12,7 +12,8 @@
       <version>4.3.1.72-yahoo</version>
       <version>4.3.1.73-yahoo</version>
       <version>4.3.1.74-yahoo</version>
+      <version>4.3.1.75-yahoo</version>
     </versions>
-    <lastUpdated>20170907214545</lastUpdated>
+    <lastUpdated>20170920140036</lastUpdated>
   </versioning>
 </metadata>
