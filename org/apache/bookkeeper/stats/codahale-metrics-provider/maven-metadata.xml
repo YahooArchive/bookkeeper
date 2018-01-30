@@ -3,7 +3,7 @@
   <groupId>org.apache.bookkeeper.stats</groupId>
   <artifactId>codahale-metrics-provider</artifactId>
   <versioning>
-    <release>4.3.1.85-yahoo</release>
+    <release>4.3.1.86-yahoo</release>
     <versions>
       <version>4.3.1.27-yahoo</version>
       <version>4.3.1.28-yahoo</version>
@@ -57,7 +57,8 @@
       <version>4.3.1.83-yahoo</version>
       <version>4.3.1.84-yahoo</version>
       <version>4.3.1.85-yahoo</version>
+      <version>4.3.1.86-yahoo</version>
     </versions>
-    <lastUpdated>20180123005045</lastUpdated>
+    <lastUpdated>20180130175307</lastUpdated>
   </versioning>
 </metadata>
