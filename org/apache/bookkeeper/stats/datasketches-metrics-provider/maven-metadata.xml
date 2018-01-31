@@ -3,7 +3,7 @@
   <groupId>org.apache.bookkeeper.stats</groupId>
   <artifactId>datasketches-metrics-provider</artifactId>
   <versioning>
-    <release>4.3.1.86-yahoo</release>
+    <release>4.3.1.87-yahoo</release>
     <versions>
       <version>4.3.1.45-yahoo</version>
       <version>4.3.1.46-yahoo</version>
@@ -40,7 +40,8 @@
       <version>4.3.1.84-yahoo</version>
       <version>4.3.1.85-yahoo</version>
       <version>4.3.1.86-yahoo</version>
+      <version>4.3.1.87-yahoo</version>
     </versions>
-    <lastUpdated>20180130175308</lastUpdated>
+    <lastUpdated>20180131044955</lastUpdated>
   </versioning>
 </metadata>
