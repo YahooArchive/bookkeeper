@@ -20,15 +20,26 @@
  */
 package org.apache.bookkeeper.test;
 
-import org.apache.bookkeeper.conf.ServerConfiguration;
+import static org.junit.Assert.assertEquals;
+
+import org.apache.bookkeeper.conf.AbstractConfiguration;
 import org.apache.bookkeeper.conf.ClientConfiguration;
+import org.apache.bookkeeper.conf.ServerConfiguration;
 
 import org.junit.Test;
 
-import static org.junit.Assert.*;
-
+/**
+ * Test the configuration class.
+ */
 public class ConfigurationTest {
-    @Test(timeout=60000)
+
+    static {
+        // this property is read when AbstractConfiguration class is loaded.
+        // this test will work as expected only using a new JVM (or classloader) for the test
+        System.setProperty(AbstractConfiguration.READ_SYSTEM_PROPERTIES_PROPERTY, "true");
+    }
+
+    @Test
     public void testConfigurationOverwrite() {
         System.clearProperty("zkServers");
 
@@ -54,7 +65,7 @@ public class ConfigurationTest {
         assertEquals("newserver", conf2.getZkServers());
     }
 
-    @Test(timeout=60000)
+    @Test
     public void testGetZkServers() {
         System.setProperty("zkServers", "server1:port1,server2:port2");
         ServerConfiguration conf = new ServerConfiguration();

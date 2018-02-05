@@ -21,21 +21,24 @@
 
 package org.apache.bookkeeper.bookie;
 
+import com.google.common.annotations.VisibleForTesting;
+
+import io.netty.util.concurrent.DefaultThreadFactory;
+
 import java.io.IOException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+import lombok.extern.slf4j.Slf4j;
 
 import org.apache.bookkeeper.bookie.CheckpointSource.Checkpoint;
 import org.apache.bookkeeper.bookie.LedgerDirsManager.LedgerDirsListener;
 import org.apache.bookkeeper.bookie.LedgerDirsManager.NoWritableLedgerDirException;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.util.MathUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 /**
  * SyncThread is a background thread which help checkpointing ledger storage
@@ -54,14 +57,18 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
  * for manual recovery in critical disaster.
  * </p>
  */
-class SyncThread {
-    private final static Logger LOG = LoggerFactory.getLogger(SyncThread.class);
+@Slf4j
+class SyncThread implements Checkpointer {
 
     final ScheduledExecutorService executor;
     final int flushInterval;
     final LedgerStorage ledgerStorage;
     final LedgerDirsListener dirsListener;
     final CheckpointSource checkpointSource;
+
+    private final Object suspensionLock = new Object();
+    private boolean suspended = false;
+    private boolean disableCheckpoint = false;
 
     public SyncThread(ServerConfiguration conf,
                       LedgerDirsListener dirsListener,
@@ -70,34 +77,46 @@ class SyncThread {
         this.dirsListener = dirsListener;
         this.ledgerStorage = ledgerStorage;
         this.checkpointSource = checkpointSource;
-        ThreadFactoryBuilder tfb = new ThreadFactoryBuilder()
-            .setNameFormat("SyncThread-" + conf.getBookiePort() + "-%d");
-        this.executor = Executors.newSingleThreadScheduledExecutor(tfb.build());
+        this.executor = Executors.newSingleThreadScheduledExecutor(new DefaultThreadFactory("SyncThread"));
         flushInterval = conf.getFlushInterval();
-        LOG.debug("Flush Interval : {}", flushInterval);
+        if (log.isDebugEnabled()) {
+            log.debug("Flush Interval : {}", flushInterval);
+        }
     }
 
-    void start() {
-        executor.scheduleAtFixedRate(new Runnable() {
-                public void run() {
-                    try {
-                        synchronized (suspensionLock) {
-                            while (suspended) {
-                                try {
-                                    suspensionLock.wait();
-                                } catch (InterruptedException e) {
-                                    Thread.currentThread().interrupt();
-                                    continue;
-                                }
-                            }
+    @Override
+    public void startCheckpoint(Checkpoint checkpoint) {
+        executor.submit(() -> {
+            try {
+                synchronized (suspensionLock) {
+                    while (suspended) {
+                        try {
+                            suspensionLock.wait();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            continue;
                         }
-                        checkpoint(checkpointSource.newCheckpoint());
-                    } catch (Throwable t) {
-                        LOG.error("Exception in SyncThread", t);
-                        dirsListener.fatalError();
                     }
                 }
-            }, flushInterval, flushInterval, TimeUnit.MILLISECONDS);
+                if (!disableCheckpoint) {
+                    checkpoint(checkpoint);
+                }
+            } catch (Throwable t) {
+                log.error("Exception in SyncThread", t);
+                dirsListener.fatalError();
+            }
+        });
+    }
+
+    public Future<Void> requestFlush() {
+        return executor.submit(() -> {
+            try {
+                flush();
+            } catch (Throwable t) {
+                log.error("Exception flushing ledgers ", t);
+            }
+            return null;
+        });
     }
 
     private void flush() {
@@ -105,52 +124,59 @@ class SyncThread {
         try {
             ledgerStorage.flush();
         } catch (NoWritableLedgerDirException e) {
-            LOG.error("No writeable ledger directories", e);
+            log.error("No writeable ledger directories", e);
             dirsListener.allDisksFull();
             return;
         } catch (IOException e) {
-            LOG.error("Exception flushing ledgers", e);
+            log.error("Exception flushing ledgers", e);
             return;
         }
 
+        if (disableCheckpoint) {
+            return;
+        }
+
+        log.info("Flush ledger storage at checkpoint {}.", checkpoint);
         try {
             checkpointSource.checkpointComplete(checkpoint, false);
         } catch (IOException e) {
-            LOG.error("Exception marking checkpoint as complete", e);
+            log.error("Exception marking checkpoint as complete", e);
             dirsListener.allDisksFull();
         }
     }
 
     @VisibleForTesting
     public void checkpoint(Checkpoint checkpoint) {
+        if (null == checkpoint) {
+            // do nothing if checkpoint is null
+            return;
+        }
+
         try {
-            checkpoint = ledgerStorage.checkpoint(checkpoint);
+            ledgerStorage.checkpoint(checkpoint);
         } catch (NoWritableLedgerDirException e) {
-            LOG.error("No writeable ledger directories", e);
+            log.error("No writeable ledger directories", e);
             dirsListener.allDisksFull();
             return;
         } catch (IOException e) {
-            LOG.error("Exception flushing ledgers", e);
+            log.error("Exception flushing ledgers", e);
             return;
         }
 
         try {
             checkpointSource.checkpointComplete(checkpoint, true);
         } catch (IOException e) {
-            LOG.error("Exception marking checkpoint as complete", e);
+            log.error("Exception marking checkpoint as complete", e);
             dirsListener.allDisksFull();
         }
     }
-
-    private Object suspensionLock = new Object();
-    private boolean suspended = false;
 
     /**
      * Suspend sync thread. (for testing)
      */
     @VisibleForTesting
     public void suspendSync() {
-        synchronized(suspensionLock) {
+        synchronized (suspensionLock) {
             suspended = true;
         }
     }
@@ -160,29 +186,26 @@ class SyncThread {
      */
     @VisibleForTesting
     public void resumeSync() {
-        synchronized(suspensionLock) {
+        synchronized (suspensionLock) {
             suspended = false;
             suspensionLock.notify();
         }
     }
 
+    @VisibleForTesting
+    public void disableCheckpoint() {
+        disableCheckpoint = true;
+    }
+
     // shutdown sync thread
     void shutdown() throws InterruptedException {
-        LOG.info("Shutting down SyncThread");
-        executor.submit(new Runnable() {
-                public void run() {
-                    try {
-                        flush();
-                    } catch (Throwable t) {
-                        LOG.error("Exception flushing ledgers at shutdown", t);
-                    }
-                }
-            });
+        log.info("Shutting down SyncThread");
+        requestFlush();
         executor.shutdown();
         long start = MathUtils.now();
         while (!executor.awaitTermination(5, TimeUnit.MINUTES)) {
             long now = MathUtils.now();
-            LOG.info("SyncThread taking a long time to shutdown. Has taken {}"
+            log.info("SyncThread taking a long time to shutdown. Has taken {}"
                     + " seconds so far", now - start);
         }
     }

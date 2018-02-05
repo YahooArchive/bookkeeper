@@ -17,6 +17,11 @@
  */
 package org.apache.bookkeeper.proto;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
+import io.netty.util.Recycler;
+import io.netty.util.Recycler.Handle;
+
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
@@ -25,22 +30,28 @@ import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.proto.BookieProtocol.Request;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.WriteCallback;
 import org.apache.bookkeeper.util.MathUtils;
-import org.jboss.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Processes add entry requests
+ * Processes add entry requests.
  */
 class WriteEntryProcessor extends PacketProcessorBase implements WriteCallback {
 
-    private final static Logger LOG = LoggerFactory.getLogger(WriteEntryProcessor.class);
+    private static final Logger LOG = LoggerFactory.getLogger(WriteEntryProcessor.class);
 
     long startTimeNanos;
 
-    public WriteEntryProcessor(Request request, Channel channel,
+    protected void reset() {
+        super.reset();
+        startTimeNanos = -1L;
+    }
+
+    public static WriteEntryProcessor create(Request request, Channel channel,
                                BookieRequestProcessor requestProcessor) {
-        super(request, channel, requestProcessor);
+        WriteEntryProcessor wep = RECYCLER.get();
+        wep.init(request, channel, requestProcessor);
+        return wep;
     }
 
     @Override
@@ -54,18 +65,19 @@ class WriteEntryProcessor extends PacketProcessorBase implements WriteCallback {
             sendResponse(BookieProtocol.EREADONLY,
                          ResponseBuilder.buildErrorResponse(BookieProtocol.EREADONLY, add),
                          requestProcessor.addRequestStats);
+            add.release();
+            add.recycle();
             return;
         }
 
         startTimeNanos = MathUtils.nowInNano();
         int rc = BookieProtocol.EOK;
+        ByteBuf addData = add.getData();
         try {
             if (add.isRecoveryAdd()) {
-                requestProcessor.bookie.recoveryAddEntry(add.getDataAsByteBuffer(),
-                                                         this, channel, add.getMasterKey());
+                requestProcessor.bookie.recoveryAddEntry(addData, this, channel, add.getMasterKey());
             } else {
-                requestProcessor.bookie.addEntry(add.getDataAsByteBuffer(),
-                                                 this, channel, add.getMasterKey());
+                requestProcessor.bookie.addEntry(addData, false, this, channel, add.getMasterKey());
             }
         } catch (IOException e) {
             LOG.error("Error writing " + add, e);
@@ -76,13 +88,21 @@ class WriteEntryProcessor extends PacketProcessorBase implements WriteCallback {
         } catch (BookieException e) {
             LOG.error("Unauthorized access to ledger " + add.getLedgerId(), e);
             rc = BookieProtocol.EUA;
+        } catch (Throwable t) {
+            LOG.error("Unexpected exception while writing {}@{} : {}", add.ledgerId, add.entryId, t.getMessage(), t);
+            // some bad request which cause unexpected exception
+            rc = BookieProtocol.EBADREQ;
+        } finally {
+            addData.release();
         }
+
         if (rc != BookieProtocol.EOK) {
             requestProcessor.addEntryStats.registerFailedEvent(MathUtils.elapsedNanos(startTimeNanos),
                     TimeUnit.NANOSECONDS);
             sendResponse(rc,
                          ResponseBuilder.buildErrorResponse(rc, add),
                          requestProcessor.addRequestStats);
+            add.recycle();
         }
     }
 
@@ -99,6 +119,8 @@ class WriteEntryProcessor extends PacketProcessorBase implements WriteCallback {
         sendResponse(rc,
                      ResponseBuilder.buildAddResponse(request),
                      requestProcessor.addRequestStats);
+        request.recycle();
+        recycle();
     }
 
     @Override
@@ -106,4 +128,22 @@ class WriteEntryProcessor extends PacketProcessorBase implements WriteCallback {
         return String.format("WriteEntry(%d, %d)",
                              request.getLedgerId(), request.getEntryId());
     }
+
+    private void recycle() {
+        reset();
+        recyclerHandle.recycle(this);
+    }
+
+    private final Recycler.Handle<WriteEntryProcessor> recyclerHandle;
+
+    private WriteEntryProcessor(Recycler.Handle<WriteEntryProcessor> recyclerHandle) {
+        this.recyclerHandle = recyclerHandle;
+    }
+
+    private static final Recycler<WriteEntryProcessor> RECYCLER = new Recycler<WriteEntryProcessor>() {
+        @Override
+        protected WriteEntryProcessor newObject(Recycler.Handle<WriteEntryProcessor> handle) {
+            return new WriteEntryProcessor(handle);
+        }
+    };
 }

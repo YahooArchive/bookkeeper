@@ -17,28 +17,39 @@
  */
 package org.apache.bookkeeper.proto;
 
+import io.netty.channel.Channel;
+
 import java.util.concurrent.TimeUnit;
 
-import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.proto.BookieProtocol.Request;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.util.MathUtils;
-import org.jboss.netty.channel.Channel;
+import org.apache.bookkeeper.util.SafeRunnable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-abstract class PacketProcessorBase implements Runnable {
-    private final static Logger logger = LoggerFactory.getLogger(PacketProcessorBase.class);
-    final Request request;
-    final Channel channel;
-    final BookieRequestProcessor requestProcessor;
-    final long enqueueNanos;
+/**
+ * A base class for bookeeper packet processors.
+ */
+abstract class PacketProcessorBase extends SafeRunnable {
+    private static final Logger logger = LoggerFactory.getLogger(PacketProcessorBase.class);
+    Request request;
+    Channel channel;
+    BookieRequestProcessor requestProcessor;
+    long enqueueNanos;
 
-    PacketProcessorBase(Request request, Channel channel, BookieRequestProcessor requestProcessor) {
+    protected void init(Request request, Channel channel, BookieRequestProcessor requestProcessor) {
         this.request = request;
         this.channel = channel;
         this.requestProcessor = requestProcessor;
         this.enqueueNanos = MathUtils.nowInNano();
+    }
+
+    protected void reset() {
+        request = null;
+        channel = null;
+        requestProcessor = null;
+        enqueueNanos = -1;
     }
 
     protected boolean isVersionCompatible() {
@@ -55,7 +66,7 @@ abstract class PacketProcessorBase implements Runnable {
     }
 
     protected void sendResponse(int rc, Object response, OpStatsLogger statsLogger) {
-        channel.write(response);
+        channel.writeAndFlush(response, channel.voidPromise());
         if (BookieProtocol.EOK == rc) {
             statsLogger.registerSuccessfulEvent(MathUtils.elapsedNanos(enqueueNanos), TimeUnit.NANOSECONDS);
         } else {
@@ -64,7 +75,7 @@ abstract class PacketProcessorBase implements Runnable {
     }
 
     @Override
-    public void run() {
+    public void safeRun() {
         if (!isVersionCompatible()) {
             sendResponse(BookieProtocol.EBADVERSION,
                          ResponseBuilder.buildErrorResponse(BookieProtocol.EBADVERSION, request),

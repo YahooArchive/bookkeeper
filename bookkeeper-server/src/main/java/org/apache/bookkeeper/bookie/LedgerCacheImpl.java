@@ -21,8 +21,9 @@
 
 package org.apache.bookkeeper.bookie;
 
+import io.netty.buffer.ByteBuf;
 import java.io.IOException;
-
+import org.apache.bookkeeper.common.util.Watcher;
 import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
@@ -35,7 +36,7 @@ import org.slf4j.LoggerFactory;
  * This class serves two purposes.
  */
 public class LedgerCacheImpl implements LedgerCache {
-    private final static Logger LOG = LoggerFactory.getLogger(LedgerCacheImpl.class);
+    private static final Logger LOG = LoggerFactory.getLogger(LedgerCacheImpl.class);
 
     private final IndexInMemPageMgr indexPageManager;
     private final IndexPersistenceMgr indexPersistenceManager;
@@ -73,6 +74,24 @@ public class LedgerCacheImpl implements LedgerCache {
     }
 
     @Override
+    public Long getLastAddConfirmed(long ledgerId) throws IOException {
+        return indexPersistenceManager.getLastAddConfirmed(ledgerId);
+    }
+
+    @Override
+    public long updateLastAddConfirmed(long ledgerId, long lac) throws IOException {
+        return indexPersistenceManager.updateLastAddConfirmed(ledgerId, lac);
+    }
+
+    @Override
+    public boolean waitForLastAddConfirmedUpdate(long ledgerId,
+                                                 long previousLAC,
+                                                 Watcher<LastAddConfirmedUpdateNotification> watcher)
+            throws IOException {
+        return indexPersistenceManager.waitForLastAddConfirmedUpdate(ledgerId, previousLAC, watcher);
+    }
+
+    @Override
     public void putEntryOffset(long ledger, long entry, long offset) throws IOException {
         indexPageManager.putEntryOffset(ledger, entry, offset);
     }
@@ -105,7 +124,9 @@ public class LedgerCacheImpl implements LedgerCache {
      */
     @Override
     public void deleteLedger(long ledgerId) throws IOException {
-        LOG.debug("Deleting ledgerId: {}", ledgerId);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Deleting ledgerId: {}", ledgerId);
+        }
 
         indexPageManager.removePagesForLedger(ledgerId);
         indexPersistenceManager.removeLedger(ledgerId);
@@ -126,6 +147,14 @@ public class LedgerCacheImpl implements LedgerCache {
         return indexPersistenceManager.isFenced(ledgerId);
     }
 
+    public void setExplicitLac(long ledgerId, ByteBuf lac) throws IOException {
+        indexPersistenceManager.setExplicitLac(ledgerId, lac);
+    }
+
+    public ByteBuf getExplicitLac(long ledgerId) {
+        return indexPersistenceManager.getExplicitLac(ledgerId);
+    }
+
     @Override
     public void setMasterKey(long ledgerId, byte[] masterKey) throws IOException {
         indexPersistenceManager.setMasterKey(ledgerId, masterKey);
@@ -134,46 +163,6 @@ public class LedgerCacheImpl implements LedgerCache {
     @Override
     public boolean ledgerExists(long ledgerId) throws IOException {
         return indexPersistenceManager.ledgerExists(ledgerId);
-    }
-
-    @Override
-    public LedgerCacheBean getJMXBean() {
-        return new LedgerCacheBean() {
-            @Override
-            public String getName() {
-                return "LedgerCache";
-            }
-
-            @Override
-            public boolean isHidden() {
-                return false;
-            }
-
-            @Override
-            public int getPageCount() {
-                return LedgerCacheImpl.this.indexPageManager.getNumUsedPages();
-            }
-
-            @Override
-            public int getPageSize() {
-                return LedgerCacheImpl.this.getPageSize();
-            }
-
-            @Override
-            public int getOpenFileLimit() {
-                return LedgerCacheImpl.this.indexPersistenceManager.getOpenFileLimit();
-            }
-
-            @Override
-            public int getPageLimit() {
-                return LedgerCacheImpl.this.indexPageManager.getPageLimit();
-            }
-
-            @Override
-            public int getNumOpenLedgers() {
-                return LedgerCacheImpl.this.indexPersistenceManager.getNumOpenLedgers();
-            }
-        };
     }
 
     @Override

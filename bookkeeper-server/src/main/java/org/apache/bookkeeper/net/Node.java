@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// This code has been copied from hadoop-common 0.23.1
 package org.apache.bookkeeper.net;
 
 import com.google.common.annotations.Beta;
@@ -31,32 +30,38 @@ import com.google.common.annotations.Beta;
  */
 @Beta
 public interface Node {
-    /** @return the string representation of this node's network location */
-    public String getNetworkLocation();
+    /** @return the string representation of this node's network location at the specified level in the hierarchy*/
+    String getNetworkLocation(int level);
 
-    /** Set this node's network location
+    /** @return the string representation of this node's network location */
+    String getNetworkLocation();
+
+    /**
+     * Set this node's network location.
      * @param location the location
      */
-    public void setNetworkLocation(String location);
+    void setNetworkLocation(String location);
 
     /** @return this node's name */
-    public String getName();
+    String getName();
 
     /** @return this node's parent */
-    public Node getParent();
+    Node getParent();
 
-    /** Set this node's parent
+    /**
+     * Set this node's parent.
      * @param parent the parent
      */
-    public void setParent(Node parent);
+    void setParent(Node parent);
 
     /** @return this node's level in the tree.
      * E.g. the root of a tree returns 0 and its children return 1
      */
-    public int getLevel();
+    int getLevel();
 
-    /** Set this node's level in the tree
+    /**
+     * Set this node's level in the tree.
      * @param i the level
      */
-    public void setLevel(int i);
+    void setLevel(int i);
 }

@@ -17,13 +17,15 @@
  */
 package org.apache.bookkeeper.client;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.util.ReferenceCountUtil;
+
 import org.apache.bookkeeper.client.BKException.BKDigestMatchException;
-import org.apache.bookkeeper.client.DigestManager.RecoveryData;
-import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback;
 import org.apache.bookkeeper.proto.BookieProtocol;
+import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.ReadEntryCallback;
+import org.apache.bookkeeper.proto.checksum.DigestManager.RecoveryData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.jboss.netty.buffer.ChannelBuffer;
 
 /**
  * This class encapsulated the read last confirmed operation.
@@ -41,10 +43,10 @@ class ReadLastConfirmedOp implements ReadEntryCallback {
     final DistributionSchedule.QuorumCoverageSet coverageSet;
 
     /**
-     * Wrapper to get all recovered data from the request
+     * Wrapper to get all recovered data from the request.
      */
     interface LastConfirmedDataCallback {
-        public void readLastConfirmedDataComplete(int rc, RecoveryData data);
+        void readLastConfirmedDataComplete(int rc, RecoveryData data);
     }
 
     public ReadLastConfirmedOp(LedgerHandle lh, LastConfirmedDataCallback cb) {
@@ -57,7 +59,7 @@ class ReadLastConfirmedOp implements ReadEntryCallback {
 
     public void initiate() {
         for (int i = 0; i < lh.metadata.currentEnsemble.size(); i++) {
-            lh.bk.bookieClient.readEntry(lh.metadata.currentEnsemble.get(i),
+            lh.bk.getBookieClient().readEntry(lh.metadata.currentEnsemble.get(i),
                                          lh.ledgerId,
                                          BookieProtocol.LAST_ADD_CONFIRMED,
                                          this, i);
@@ -66,7 +68,7 @@ class ReadLastConfirmedOp implements ReadEntryCallback {
 
     public void initiateWithFencing() {
         for (int i = 0; i < lh.metadata.currentEnsemble.size(); i++) {
-            lh.bk.bookieClient.readEntryAndFenceLedger(lh.metadata.currentEnsemble.get(i),
+            lh.bk.getBookieClient().readEntryAndFenceLedger(lh.metadata.currentEnsemble.get(i),
                                                        lh.ledgerId,
                                                        lh.ledgerKey,
                                                        BookieProtocol.LAST_ADD_CONFIRMED,
@@ -75,15 +77,18 @@ class ReadLastConfirmedOp implements ReadEntryCallback {
     }
 
     public synchronized void readEntryComplete(final int rc, final long ledgerId, final long entryId,
-            final ChannelBuffer buffer, final Object ctx) {
+            final ByteBuf buffer, final Object ctx) {
         int bookieIndex = (Integer) ctx;
+
+        // add the response to coverage set
+        coverageSet.addBookie(bookieIndex, rc);
 
         numResponsesPending--;
         boolean heardValidResponse = false;
         if (rc == BKException.Code.OK) {
             try {
                 RecoveryData recoveryData = lh.macManager.verifyDigestAndReturnLastConfirmed(buffer);
-                if (recoveryData.lastAddConfirmed > maxRecoveredData.lastAddConfirmed) {
+                if (recoveryData.getLastAddConfirmed() > maxRecoveredData.getLastAddConfirmed()) {
                     maxRecoveredData = recoveryData;
                 }
                 heardValidResponse = true;
@@ -95,6 +100,8 @@ class ReadLastConfirmedOp implements ReadEntryCallback {
                           + lh.metadata.currentEnsemble.get(bookieIndex));
             }
         }
+
+        ReferenceCountUtil.release(buffer);
 
         if (rc == BKException.Code.NoSuchLedgerExistsException || rc == BKException.Code.NoSuchEntryException) {
             // this still counts as a valid response, e.g., if the client crashed without writing any entry
@@ -112,11 +119,13 @@ class ReadLastConfirmedOp implements ReadEntryCallback {
 
         // other return codes dont count as valid responses
         if (heardValidResponse
-            && coverageSet.addBookieAndCheckCovered(bookieIndex)
+            && coverageSet.checkCovered()
             && !completed) {
             completed = true;
-            LOG.debug("Read Complete with enough validResponses for ledger: {}, entry: {}",
-                ledgerId, entryId);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Read Complete with enough validResponses for ledger: {}, entry: {}",
+                        ledgerId, entryId);
+            }
 
             cb.readLastConfirmedDataComplete(BKException.Code.OK, maxRecoveredData);
             return;
@@ -124,7 +133,7 @@ class ReadLastConfirmedOp implements ReadEntryCallback {
 
         if (numResponsesPending == 0 && !completed) {
             // Have got all responses back but was still not enough, just fail the operation
-            LOG.error("While readLastConfirmed ledger: " + ledgerId + " did not hear success responses from all quorums");
+            LOG.error("While readLastConfirmed ledger: {} did not hear success responses from all quorums", ledgerId);
             cb.readLastConfirmedDataComplete(lastSeenError, maxRecoveredData);
         }
 

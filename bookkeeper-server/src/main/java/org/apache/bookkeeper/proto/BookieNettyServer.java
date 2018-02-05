@@ -20,94 +20,135 @@
  */
 package org.apache.bookkeeper.proto;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.protobuf.ExtensionRegistry;
+
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.buffer.PooledByteBufAllocator;
+import io.netty.channel.AdaptiveRecvByteBufAllocator;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandler;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.DefaultEventLoopGroup;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.epoll.EpollServerSocketChannel;
+import io.netty.channel.group.ChannelGroup;
+import io.netty.channel.group.ChannelGroupFuture;
+import io.netty.channel.group.DefaultChannelGroup;
+import io.netty.channel.local.LocalChannel;
+import io.netty.channel.local.LocalServerChannel;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import io.netty.handler.codec.LengthFieldPrepender;
+import io.netty.handler.ssl.SslHandler;
+import io.netty.util.concurrent.DefaultThreadFactory;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.concurrent.Executors;
+import java.net.SocketAddress;
+import java.security.cert.Certificate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.net.ssl.SSLPeerUnverifiedException;
+
+import org.apache.bookkeeper.auth.AuthProviderFactoryFactory;
+import org.apache.bookkeeper.auth.BookKeeperPrincipal;
+import org.apache.bookkeeper.auth.BookieAuthProvider;
 import org.apache.bookkeeper.bookie.Bookie;
 import org.apache.bookkeeper.bookie.BookieException;
 import org.apache.bookkeeper.conf.ServerConfiguration;
-import org.apache.bookkeeper.auth.BookieAuthProvider;
-import org.apache.bookkeeper.auth.AuthProviderFactoryFactory;
+import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.processor.RequestProcessor;
+import org.apache.commons.lang.SystemUtils;
 import org.apache.zookeeper.KeeperException;
-import org.jboss.netty.bootstrap.ServerBootstrap;
-import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelFactory;
-import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.channel.ChannelPipeline;
-import org.jboss.netty.channel.ChannelPipelineFactory;
-import org.jboss.netty.channel.ChannelStateEvent;
-import org.jboss.netty.channel.Channels;
-import org.jboss.netty.channel.SimpleChannelHandler;
-import org.jboss.netty.channel.group.ChannelGroup;
-import org.jboss.netty.channel.group.ChannelGroupFuture;
-import org.jboss.netty.channel.group.DefaultChannelGroup;
-import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
-import org.jboss.netty.handler.codec.frame.LengthFieldBasedFrameDecoder;
-import org.jboss.netty.handler.codec.frame.LengthFieldPrepender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.protobuf.ExtensionRegistry;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import org.apache.bookkeeper.net.BookieSocketAddress;
-import org.jboss.netty.channel.local.DefaultLocalServerChannelFactory;
-import org.jboss.netty.channel.local.LocalAddress;
-
 /**
- * Netty server for serving bookie requests
+ * Netty server for serving bookie requests.
  */
 class BookieNettyServer {
-    private final static Logger LOG = LoggerFactory.getLogger(BookieNettyServer.class);
 
-    final static int maxMessageSize = 0xfffff;
+    private static final Logger LOG = LoggerFactory.getLogger(BookieNettyServer.class);
+
+    final int maxFrameSize;
     final ServerConfiguration conf;
-    final ChannelFactory serverChannelFactory;
-    final ChannelFactory jvmServerChannelFactory;
-    final RequestProcessor requestProcessor;
-    final ChannelGroup allChannels = new CleanupChannelGroup();
+    final EventLoopGroup eventLoopGroup;
+    final EventLoopGroup jvmEventLoopGroup;
+    RequestProcessor requestProcessor;
     final AtomicBoolean isRunning = new AtomicBoolean(false);
-    Object suspensionLock = new Object();
-    boolean suspended = false;
+    final AtomicBoolean isClosed = new AtomicBoolean(false);
+    final Object suspensionLock = new Object();
+    volatile boolean suspended = false;
+    ChannelGroup allChannels;
     final BookieSocketAddress bookieAddress;
+    final InetSocketAddress bindAddress;
 
     final BookieAuthProvider.Factory authProviderFactory;
-    final BookieProtoEncoding.ResponseEncoder responseEncoder;
-    final BookieProtoEncoding.RequestDecoder requestDecoder;
+    final ExtensionRegistry registry = ExtensionRegistry.newInstance();
 
     BookieNettyServer(ServerConfiguration conf, RequestProcessor processor)
-            throws IOException, KeeperException, InterruptedException, BookieException  {
+        throws IOException, KeeperException, InterruptedException, BookieException {
+        this.maxFrameSize = conf.getNettyMaxFrameSizeBytes();
         this.conf = conf;
         this.requestProcessor = processor;
+        this.authProviderFactory = AuthProviderFactoryFactory.newBookieAuthProviderFactory(conf);
 
-        ExtensionRegistry registry = ExtensionRegistry.newInstance();
-        authProviderFactory = AuthProviderFactoryFactory.newBookieAuthProviderFactory(conf, registry);
+        if (!conf.isDisableServerSocketBind()) {
+            ThreadFactory threadFactory = new DefaultThreadFactory("bookie-io");
+            final int numThreads = Runtime.getRuntime().availableProcessors() * 2;
 
-        responseEncoder = new BookieProtoEncoding.ResponseEncoder(registry);
-        requestDecoder = new BookieProtoEncoding.RequestDecoder(registry);
+            EventLoopGroup eventLoopGroup;
+            if (SystemUtils.IS_OS_LINUX) {
+                try {
+                    eventLoopGroup = new EpollEventLoopGroup(numThreads, threadFactory);
+                } catch (ExceptionInInitializerError | NoClassDefFoundError | UnsatisfiedLinkError e) {
+                    LOG.warn("Could not use Netty Epoll event loop for bookie server: {}", e.getMessage());
+                    eventLoopGroup = new NioEventLoopGroup(numThreads, threadFactory);
+                }
+            } else {
+                eventLoopGroup = new NioEventLoopGroup(numThreads, threadFactory);
+            }
 
-        ThreadFactoryBuilder tfb = new ThreadFactoryBuilder();
-        String base = "bookie-" + conf.getBookiePort() + "-netty";
-        serverChannelFactory = new NioServerSocketChannelFactory(
-                Executors.newCachedThreadPool(tfb.setNameFormat(base + "-boss-%d").build()),
-                Executors.newCachedThreadPool(tfb.setNameFormat(base + "-worker-%d").build()));
-        if (conf.isEnableLocalTransport()) {
-            jvmServerChannelFactory = new DefaultLocalServerChannelFactory();
+            this.eventLoopGroup = eventLoopGroup;
+            allChannels = new CleanupChannelGroup(eventLoopGroup);
         } else {
-            jvmServerChannelFactory = null;
+            this.eventLoopGroup = null;
         }
+
+        if (conf.isEnableLocalTransport()) {
+            jvmEventLoopGroup = new DefaultEventLoopGroup();
+            allChannels = new CleanupChannelGroup(jvmEventLoopGroup);
+        } else {
+            jvmEventLoopGroup = null;
+        }
+
         bookieAddress = Bookie.getBookieAddress(conf);
-        InetSocketAddress bindAddress;
         if (conf.getListeningInterface() == null) {
-            // listen on all interfaces
             bindAddress = new InetSocketAddress(conf.getBookiePort());
         } else {
             bindAddress = bookieAddress.getSocketAddress();
         }
         listenOn(bindAddress, bookieAddress);
+    }
+
+    public BookieNettyServer setRequestProcessor(RequestProcessor processor) {
+        this.requestProcessor = processor;
+        return this;
     }
 
     boolean isRunning() {
@@ -118,7 +159,19 @@ class BookieNettyServer {
     void suspendProcessing() {
         synchronized (suspensionLock) {
             suspended = true;
-            allChannels.setReadable(false).awaitUninterruptibly();
+            for (Channel channel : allChannels) {
+                // To suspend processing in the bookie, submit a task
+                // that keeps the event loop busy until resume is
+                // explicitely invoked
+                channel.eventLoop().submit(() -> {
+                    while (suspended && isRunning()) {
+                        try {
+                            Thread.sleep(10);
+                        } catch (InterruptedException e) {
+                        }
+                    }
+                });
+            }
         }
     }
 
@@ -126,88 +179,253 @@ class BookieNettyServer {
     void resumeProcessing() {
         synchronized (suspensionLock) {
             suspended = false;
-            allChannels.setReadable(true).awaitUninterruptibly();
+            for (Channel channel : allChannels) {
+                channel.config().setAutoRead(true);
+            }
             suspensionLock.notifyAll();
         }
     }
 
-    private void listenOn(InetSocketAddress address, BookieSocketAddress bookieAddress) {
-        ServerBootstrap bootstrap = new ServerBootstrap(serverChannelFactory);
-        bootstrap.setPipelineFactory(new BookiePipelineFactory());
-        bootstrap.setOption("child.tcpNoDelay", conf.getServerTcpNoDelay());
-        bootstrap.setOption("child.soLinger", 2);
+    class BookieSideConnectionPeerContextHandler extends ChannelInboundHandlerAdapter {
 
-        Channel listen = bootstrap.bind(address);
-        allChannels.add(listen);
+        final BookieConnectionPeer connectionPeer;
+        volatile Channel channel;
+        volatile BookKeeperPrincipal authorizedId = BookKeeperPrincipal.ANONYMOUS;
+
+        public BookieSideConnectionPeerContextHandler() {
+            this.connectionPeer = new BookieConnectionPeer() {
+                @Override
+                public SocketAddress getRemoteAddr() {
+                    Channel c = channel;
+                    if (c != null) {
+                        return c.remoteAddress();
+                    } else {
+                        return null;
+                    }
+                }
+
+                @Override
+                public Collection<Object> getProtocolPrincipals() {
+                    Channel c = channel;
+                    if (c == null) {
+                        return Collections.emptyList();
+                    } else {
+                        SslHandler ssl = c.pipeline().get(SslHandler.class);
+                        if (ssl == null) {
+                            return Collections.emptyList();
+                        }
+                        try {
+                            Certificate[] certificates = ssl.engine().getSession().getPeerCertificates();
+                            if (certificates == null) {
+                                return Collections.emptyList();
+                            }
+                            List<Object> result = new ArrayList<>();
+                            result.addAll(Arrays.asList(certificates));
+                            return result;
+                        } catch (SSLPeerUnverifiedException err) {
+                            LOG.error("Failed to get peer certificates", err);
+                            return Collections.emptyList();
+                        }
+
+                    }
+                }
+
+                @Override
+                public void disconnect() {
+                    Channel c = channel;
+                    if (c != null) {
+                        c.close();
+                    }
+                    LOG.info("authplugin disconnected channel {}", channel);
+                }
+
+                @Override
+                public BookKeeperPrincipal getAuthorizedId() {
+                    return authorizedId;
+                }
+
+                @Override
+                public void setAuthorizedId(BookKeeperPrincipal principal) {
+                    LOG.info("connection {} authenticated as {}", channel, principal);
+                    authorizedId = principal;
+                }
+
+                @Override
+                public boolean isSecure() {
+                    Channel c = channel;
+                    if (c == null) {
+                        return false;
+                    } else {
+                        return c.pipeline().get("tls") != null;
+                    }
+                }
+            };
+        }
+
+        public BookieConnectionPeer getConnectionPeer() {
+            return connectionPeer;
+        }
+
+        @Override
+        public void channelActive(ChannelHandlerContext ctx) throws Exception {
+            channel = ctx.channel();
+        }
+    }
+
+    private void listenOn(InetSocketAddress address, BookieSocketAddress bookieAddress) throws InterruptedException {
+        if (!conf.isDisableServerSocketBind()) {
+            ServerBootstrap bootstrap = new ServerBootstrap();
+            bootstrap.childOption(ChannelOption.ALLOCATOR, new PooledByteBufAllocator(true));
+            bootstrap.group(eventLoopGroup, eventLoopGroup);
+            bootstrap.childOption(ChannelOption.TCP_NODELAY, conf.getServerTcpNoDelay());
+            bootstrap.childOption(ChannelOption.SO_LINGER, conf.getServerSockLinger());
+            bootstrap.childOption(ChannelOption.RCVBUF_ALLOCATOR,
+                    new AdaptiveRecvByteBufAllocator(conf.getRecvByteBufAllocatorSizeMin(),
+                            conf.getRecvByteBufAllocatorSizeInitial(), conf.getRecvByteBufAllocatorSizeMax()));
+
+            if (eventLoopGroup instanceof EpollEventLoopGroup) {
+                bootstrap.channel(EpollServerSocketChannel.class);
+            } else {
+                bootstrap.channel(NioServerSocketChannel.class);
+            }
+
+            bootstrap.childHandler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(SocketChannel ch) throws Exception {
+                    synchronized (suspensionLock) {
+                        while (suspended) {
+                            suspensionLock.wait();
+                        }
+                    }
+
+                    BookieSideConnectionPeerContextHandler contextHandler =
+                        new BookieSideConnectionPeerContextHandler();
+                    ChannelPipeline pipeline = ch.pipeline();
+
+                    pipeline.addLast("lengthbaseddecoder", new LengthFieldBasedFrameDecoder(maxFrameSize, 0, 4, 0, 4));
+                    pipeline.addLast("lengthprepender", new LengthFieldPrepender(4));
+
+                    pipeline.addLast("bookieProtoDecoder", new BookieProtoEncoding.RequestDecoder(registry));
+                    pipeline.addLast("bookieProtoEncoder", new BookieProtoEncoding.ResponseEncoder(registry));
+                    pipeline.addLast("bookieAuthHandler", new AuthHandler.ServerSideHandler(
+                                contextHandler.getConnectionPeer(), authProviderFactory));
+
+                    ChannelInboundHandler requestHandler = isRunning.get()
+                            ? new BookieRequestHandler(conf, requestProcessor, allChannels)
+                            : new RejectRequestHandler();
+                    pipeline.addLast("bookieRequestHandler", requestHandler);
+
+                    pipeline.addLast("contextHandler", contextHandler);
+                }
+            });
+
+            // Bind and start to accept incoming connections
+            Channel listen = bootstrap.bind(address.getAddress(), address.getPort()).sync().channel();
+            if (listen.localAddress() instanceof InetSocketAddress) {
+                if (conf.getBookiePort() == 0) {
+                    conf.setBookiePort(((InetSocketAddress) listen.localAddress()).getPort());
+                }
+            }
+        }
 
         if (conf.isEnableLocalTransport()) {
-            ServerBootstrap jvmbootstrap = new ServerBootstrap(jvmServerChannelFactory);
-            jvmbootstrap.setPipelineFactory(new BookiePipelineFactory());
+            ServerBootstrap jvmBootstrap = new ServerBootstrap();
+            jvmBootstrap.childOption(ChannelOption.ALLOCATOR, new PooledByteBufAllocator(true));
+            jvmBootstrap.group(jvmEventLoopGroup, jvmEventLoopGroup);
+            jvmBootstrap.childOption(ChannelOption.TCP_NODELAY, conf.getServerTcpNoDelay());
+            jvmBootstrap.childOption(ChannelOption.SO_KEEPALIVE, conf.getServerSockKeepalive());
+            jvmBootstrap.childOption(ChannelOption.SO_LINGER, conf.getServerSockLinger());
+            jvmBootstrap.childOption(ChannelOption.RCVBUF_ALLOCATOR,
+                    new AdaptiveRecvByteBufAllocator(conf.getRecvByteBufAllocatorSizeMin(),
+                            conf.getRecvByteBufAllocatorSizeInitial(), conf.getRecvByteBufAllocatorSizeMax()));
+
+            if (jvmEventLoopGroup instanceof DefaultEventLoopGroup) {
+                jvmBootstrap.channel(LocalServerChannel.class);
+            } else if (jvmEventLoopGroup instanceof EpollEventLoopGroup) {
+                jvmBootstrap.channel(EpollServerSocketChannel.class);
+            } else {
+                jvmBootstrap.channel(NioServerSocketChannel.class);
+            }
+
+            jvmBootstrap.childHandler(new ChannelInitializer<LocalChannel>() {
+                @Override
+                protected void initChannel(LocalChannel ch) throws Exception {
+                    synchronized (suspensionLock) {
+                        while (suspended) {
+                            suspensionLock.wait();
+                        }
+                    }
+
+                    BookieSideConnectionPeerContextHandler contextHandler =
+                        new BookieSideConnectionPeerContextHandler();
+                    ChannelPipeline pipeline = ch.pipeline();
+
+                    pipeline.addLast("lengthbaseddecoder", new LengthFieldBasedFrameDecoder(maxFrameSize, 0, 4, 0, 4));
+                    pipeline.addLast("lengthprepender", new LengthFieldPrepender(4));
+
+                    pipeline.addLast("bookieProtoDecoder", new BookieProtoEncoding.RequestDecoder(registry));
+                    pipeline.addLast("bookieProtoEncoder", new BookieProtoEncoding.ResponseEncoder(registry));
+                    pipeline.addLast("bookieAuthHandler", new AuthHandler.ServerSideHandler(
+                                contextHandler.getConnectionPeer(), authProviderFactory));
+
+                    ChannelInboundHandler requestHandler = isRunning.get()
+                            ? new BookieRequestHandler(conf, requestProcessor, allChannels)
+                            : new RejectRequestHandler();
+                    pipeline.addLast("bookieRequestHandler", requestHandler);
+
+                    pipeline.addLast("contextHandler", contextHandler);
+                }
+            });
 
             // use the same address 'name', so clients can find local Bookie still discovering them using ZK
-            Channel jvmlisten = jvmbootstrap.bind(bookieAddress.getLocalAddress());
-            allChannels.add(jvmlisten);
+            jvmBootstrap.bind(bookieAddress.getLocalAddress()).sync();
             LocalBookiesRegistry.registerLocalBookieAddress(bookieAddress);
         }
     }
 
-    void start() {
+    void start() throws InterruptedException {
         isRunning.set(true);
     }
 
     void shutdown() {
         LOG.info("Shutting down BookieNettyServer");
-        if (conf.isEnableLocalTransport()) {
-            LocalBookiesRegistry.unregisterLocalBookieAddress(bookieAddress);
-        }
         isRunning.set(false);
+
+        if (!isClosed.compareAndSet(false, true)) {
+            // the netty server is already closed.
+            return;
+        }
+
         allChannels.close().awaitUninterruptibly();
-        serverChannelFactory.releaseExternalResources();
-        if (conf.isEnableLocalTransport()) {
-            jvmServerChannelFactory.releaseExternalResources();
-        }
-    }
 
-    private class BookiePipelineFactory implements ChannelPipelineFactory {
-        public ChannelPipeline getPipeline() throws Exception {
-            synchronized (suspensionLock) {
-                while (suspended) {
-                    suspensionLock.wait();
-                }
+        if (eventLoopGroup != null) {
+            try {
+                eventLoopGroup.shutdownGracefully(0, 10, TimeUnit.MILLISECONDS).await();
+            } catch (InterruptedException e) {
+                /// OK
             }
-            ChannelPipeline pipeline = Channels.pipeline();
-            pipeline.addLast("lengthbaseddecoder",
-                             new LengthFieldBasedFrameDecoder(maxMessageSize, 0, 4, 0, 4));
-            pipeline.addLast("lengthprepender", new LengthFieldPrepender(4));
-
-            pipeline.addLast("bookieProtoDecoder", requestDecoder);
-            pipeline.addLast("bookieProtoEncoder", responseEncoder);
-            pipeline.addLast("bookieAuthHandler",
-                             new AuthHandler.ServerSideHandler(authProviderFactory));
-
-            SimpleChannelHandler requestHandler = isRunning.get() ?
-                    new BookieRequestHandler(conf, requestProcessor, allChannels)
-                    : new RejectRequestHandler();
-
-            pipeline.addLast("bookieRequestHandler", requestHandler);
-            return pipeline;
         }
+        if (jvmEventLoopGroup != null) {
+            LocalBookiesRegistry.unregisterLocalBookieAddress(bookieAddress);
+            jvmEventLoopGroup.shutdownGracefully();
+        }
+
+        authProviderFactory.close();
     }
 
-    private static class RejectRequestHandler extends SimpleChannelHandler {
-
+    private static class RejectRequestHandler extends ChannelInboundHandlerAdapter {
         @Override
-        public void channelOpen(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
-            ctx.getChannel().close();
+        public void channelActive(ChannelHandlerContext ctx) throws Exception {
+            ctx.channel().close();
         }
-
     }
 
     private static class CleanupChannelGroup extends DefaultChannelGroup {
+
         private AtomicBoolean closed = new AtomicBoolean(false);
 
-        CleanupChannelGroup() {
-            super("BookieChannelGroup");
+        public CleanupChannelGroup(EventLoopGroup eventLoopGroup) {
+            super("BookieChannelGroup", eventLoopGroup.next());
         }
 
         @Override
@@ -230,7 +448,7 @@ class BookieNettyServer {
             if (!(o instanceof CleanupChannelGroup)) {
                 return false;
             }
-            CleanupChannelGroup other = (CleanupChannelGroup)o;
+            CleanupChannelGroup other = (CleanupChannelGroup) o;
             return other.closed.get() == closed.get()
                 && super.equals(other);
         }

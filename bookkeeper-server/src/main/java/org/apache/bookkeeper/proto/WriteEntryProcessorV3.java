@@ -20,11 +20,16 @@
  */
 package org.apache.bookkeeper.proto;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
+
 import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.util.EnumSet;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.bookkeeper.bookie.BookieException;
+import org.apache.bookkeeper.client.api.WriteFlag;
 import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.AddRequest;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.AddResponse;
@@ -32,12 +37,11 @@ import org.apache.bookkeeper.proto.BookkeeperProtocol.Request;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.Response;
 import org.apache.bookkeeper.proto.BookkeeperProtocol.StatusCode;
 import org.apache.bookkeeper.util.MathUtils;
-import org.jboss.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-class WriteEntryProcessorV3 extends PacketProcessorBaseV3 implements Runnable {
-    private final static Logger logger = LoggerFactory.getLogger(WriteEntryProcessorV3.class);
+class WriteEntryProcessorV3 extends PacketProcessorBaseV3 {
+    private static final Logger logger = LoggerFactory.getLogger(WriteEntryProcessorV3.class);
 
     public WriteEntryProcessorV3(Request request, Channel channel,
                                  BookieRequestProcessor requestProcessor) {
@@ -99,31 +103,38 @@ class WriteEntryProcessorV3 extends PacketProcessorBaseV3 implements Runnable {
                 sendResponse(status, resp, requestProcessor.addRequestStats);
             }
         };
+        final EnumSet<WriteFlag> writeFlags;
+        if (addRequest.hasWriteFlags()) {
+            writeFlags = WriteFlag.getWriteFlags(addRequest.getWriteFlags());
+        } else {
+            writeFlags = EnumSet.noneOf(WriteFlag.class);
+        }
+        final boolean ackBeforeSync = writeFlags.contains(WriteFlag.DEFERRED_SYNC);
         StatusCode status = null;
         byte[] masterKey = addRequest.getMasterKey().toByteArray();
-        ByteBuffer entryToAdd = addRequest.getBody().asReadOnlyByteBuffer();
+        ByteBuf entryToAdd = Unpooled.wrappedBuffer(addRequest.getBody().asReadOnlyByteBuffer());
         try {
             if (addRequest.hasFlag() && addRequest.getFlag().equals(AddRequest.Flag.RECOVERY_ADD)) {
                 requestProcessor.bookie.recoveryAddEntry(entryToAdd, wcb, channel, masterKey);
             } else {
-                requestProcessor.bookie.addEntry(entryToAdd, wcb, channel, masterKey);
+                requestProcessor.bookie.addEntry(entryToAdd, ackBeforeSync, wcb, channel, masterKey);
             }
             status = StatusCode.EOK;
         } catch (IOException e) {
             logger.error("Error writing entry:{} to ledger:{}",
-                         new Object[] { entryId, ledgerId, e });
+                    entryId, ledgerId, e);
             status = StatusCode.EIO;
         } catch (BookieException.LedgerFencedException e) {
-            logger.debug("Ledger fenced while writing entry:{} to ledger:{}",
-                         entryId, ledgerId);
+            logger.error("Ledger fenced while writing entry:{} to ledger:{}",
+                    entryId, ledgerId, e);
             status = StatusCode.EFENCED;
         } catch (BookieException e) {
             logger.error("Unauthorized access to ledger:{} while writing entry:{}",
-                         ledgerId, entryId);
+                    ledgerId, entryId, e);
             status = StatusCode.EUA;
         } catch (Throwable t) {
             logger.error("Unexpected exception while writing {}@{} : ",
-                         new Object[] { entryId, ledgerId, t });
+                    entryId, ledgerId, t);
             // some bad request which cause unexpected exception
             status = StatusCode.EBADREQ;
         }
@@ -138,7 +149,7 @@ class WriteEntryProcessorV3 extends PacketProcessorBaseV3 implements Runnable {
     }
 
     @Override
-    public void run() {
+    public void safeRun() {
         AddResponse addResponse = getAddResponse();
         if (null != addResponse) {
             // This means there was an error and we should send this back.

@@ -21,22 +21,25 @@
 
 package org.apache.bookkeeper.meta;
 
+import io.netty.buffer.ByteBuf;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Map;
 import java.util.NavigableMap;
-
 import org.apache.bookkeeper.bookie.BookieException;
 import org.apache.bookkeeper.bookie.CheckpointSource;
 import org.apache.bookkeeper.bookie.CheckpointSource.Checkpoint;
+import org.apache.bookkeeper.bookie.Checkpointer;
 import org.apache.bookkeeper.bookie.CompactableLedgerStorage;
 import org.apache.bookkeeper.bookie.EntryLocation;
 import org.apache.bookkeeper.bookie.EntryLogger;
+import org.apache.bookkeeper.bookie.LastAddConfirmedUpdateNotification;
 import org.apache.bookkeeper.bookie.LedgerDirsManager;
+import org.apache.bookkeeper.bookie.StateManager;
+import org.apache.bookkeeper.common.util.Watcher;
 import org.apache.bookkeeper.conf.ServerConfiguration;
-import org.apache.bookkeeper.jmx.BKMBeanInfo;
+import org.apache.bookkeeper.discover.RegistrationManager;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.test.BookKeeperClusterTestCase;
 import org.apache.bookkeeper.util.SnapshotMap;
@@ -45,15 +48,12 @@ import org.junit.Before;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
- * Test case to run over serveral ledger managers
+ * Test case to run over serveral ledger managers.
  */
 @RunWith(Parameterized.class)
 public abstract class LedgerManagerTestCase extends BookKeeperClusterTestCase {
-    static final Logger LOG = LoggerFactory.getLogger(LedgerManagerTestCase.class);
 
     protected LedgerManagerFactory ledgerManagerFactory;
     protected LedgerManager ledgerManager = null;
@@ -68,6 +68,11 @@ public abstract class LedgerManagerTestCase extends BookKeeperClusterTestCase {
         super(numBookies);
         activeLedgers = new SnapshotMap<Long, Boolean>();
         baseConf.setLedgerManagerFactoryClass(lmFactoryCls);
+        baseClientConf.setLedgerManagerFactoryClass(lmFactoryCls);
+    }
+
+    public LedgerManager getIndependentLedgerManager() {
+        return ledgerManagerFactory.newLedgerManager();
     }
 
     public LedgerManager getLedgerManager() {
@@ -89,7 +94,9 @@ public abstract class LedgerManagerTestCase extends BookKeeperClusterTestCase {
         return Arrays.asList(new Object[][] {
             { FlatLedgerManagerFactory.class },
             { HierarchicalLedgerManagerFactory.class },
-            { MSLedgerManagerFactory.class }
+            { LegacyHierarchicalLedgerManagerFactory.class },
+            { LongHierarchicalLedgerManagerFactory.class },
+            { MSLedgerManagerFactory.class },
         });
     }
 
@@ -97,7 +104,11 @@ public abstract class LedgerManagerTestCase extends BookKeeperClusterTestCase {
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        ledgerManagerFactory = LedgerManagerFactory.newLedgerManagerFactory(baseConf, zkc);
+        baseConf.setZkServers(zkUtil.getZooKeeperConnectString());
+        ledgerManagerFactory = LedgerManagerFactory.newLedgerManagerFactory(
+            baseConf,
+            RegistrationManager
+                .instantiateRegistrationManager(baseConf).getLayoutManager());
     }
 
     @After
@@ -106,16 +117,25 @@ public abstract class LedgerManagerTestCase extends BookKeeperClusterTestCase {
         if (null != ledgerManager) {
             ledgerManager.close();
         }
-        ledgerManagerFactory.uninitialize();
+        ledgerManagerFactory.close();
         super.tearDown();
     }
 
+    /**
+     * Mocked ledger storage.
+     */
     public class MockLedgerStorage implements CompactableLedgerStorage {
 
         @Override
-        public void initialize(ServerConfiguration conf, LedgerManager ledgerManager,
-                LedgerDirsManager ledgerDirsManager, LedgerDirsManager indexDirsManager,
-                CheckpointSource checkpointSource, StatsLogger statsLogger) throws IOException {
+        public void initialize(
+            ServerConfiguration conf,
+            LedgerManager ledgerManager,
+            LedgerDirsManager ledgerDirsManager,
+            LedgerDirsManager indexDirsManager,
+            StateManager stateManager,
+            CheckpointSource checkpointSource,
+            Checkpointer checkpointer,
+            StatsLogger statsLogger) throws IOException {
         }
 
         @Override
@@ -151,13 +171,18 @@ public abstract class LedgerManagerTestCase extends BookKeeperClusterTestCase {
         }
 
         @Override
-        public long addEntry(ByteBuffer entry) throws IOException {
+        public long addEntry(ByteBuf entry) throws IOException {
             return 0;
         }
 
         @Override
-        public ByteBuffer getEntry(long ledgerId, long entryId) throws IOException {
+        public ByteBuf getEntry(long ledgerId, long entryId) throws IOException {
             return null;
+        }
+
+        @Override
+        public long getLastAddConfirmed(long ledgerId) throws IOException {
+            return 0;
         }
 
         @Override
@@ -165,8 +190,11 @@ public abstract class LedgerManagerTestCase extends BookKeeperClusterTestCase {
         }
 
         @Override
-        public Checkpoint checkpoint(Checkpoint checkpoint) throws IOException {
-            return null;
+        public void checkpoint(Checkpoint checkpoint) throws IOException {
+        }
+
+        @Override
+        public void registerLedgerDeletionListener(LedgerDeletionListener listener) {
         }
 
         @Override
@@ -184,11 +212,6 @@ public abstract class LedgerManagerTestCase extends BookKeeperClusterTestCase {
         }
 
         @Override
-        public BKMBeanInfo getJMXBean() {
-            return null;
-        }
-
-        @Override
         public EntryLogger getEntryLogger() {
             return null;
         }
@@ -199,6 +222,23 @@ public abstract class LedgerManagerTestCase extends BookKeeperClusterTestCase {
 
         @Override
         public void flushEntriesLocationsIndex() throws IOException {
+        }
+
+        @Override
+        public boolean waitForLastAddConfirmedUpdate(long ledgerId,
+                                                     long previousLAC,
+                                                     Watcher<LastAddConfirmedUpdateNotification> watcher)
+                throws IOException {
+            return false;
+        }
+
+        @Override
+        public void setExplicitlac(long ledgerId, ByteBuf lac) throws IOException {
+        }
+
+        @Override
+        public ByteBuf getExplicitLac(long ledgerId) {
+            return null;
         }
     }
 }

@@ -21,6 +21,9 @@
 
 package org.apache.bookkeeper.conf;
 
+/**
+ * Test the BK configuration object.
+ */
 public class TestBKConfiguration {
 
     public static ServerConfiguration newServerConfiguration() {
@@ -29,7 +32,11 @@ public class TestBKConfiguration {
         // enable journal format version
         confReturn.setJournalFormatVersionToWrite(5);
         confReturn.setAllowLoopback(true);
+        confReturn.setAllowEphemeralPorts(true);
+        confReturn.setBookiePort(0);
         confReturn.setGcWaitTime(1000);
+        confReturn.setDiskUsageThreshold(0.999f);
+        confReturn.setDiskUsageWarnThreshold(0.99f);
         return confReturn;
     }
 

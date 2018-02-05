@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// This code has been copied from hadoop-common 0.23.1
 package org.apache.bookkeeper.net;
 
 import java.util.ArrayList;
@@ -35,16 +34,22 @@ public class CachedDNSToSwitchMapping extends AbstractDNSToSwitchMapping {
   private Map<String, String> cache = new ConcurrentHashMap<String, String>();
 
   /**
-   * The uncached mapping
+   * The uncached mapping.
    */
   protected final DNSToSwitchMapping rawMapping;
 
   /**
-   * cache a raw DNS mapping
+   * Cache a raw DNS mapping.
    * @param rawMapping the raw mapping to cache
    */
   public CachedDNSToSwitchMapping(DNSToSwitchMapping rawMapping) {
     this.rawMapping = rawMapping;
+  }
+
+  // we'll use IP Address for these mappings.
+  @Override
+  public boolean useHostName() {
+    return false;
   }
 
   /**
@@ -74,7 +79,7 @@ public class CachedDNSToSwitchMapping extends AbstractDNSToSwitchMapping {
       List<String> resolvedHosts) {
     // Cache the result
     if (resolvedHosts != null) {
-      for (int i=0; i<uncachedHosts.size(); i++) {
+      for (int i = 0; i < uncachedHosts.size(); i++) {
         cache.put(uncachedHosts.get(i), resolvedHosts.get(i));
       }
     }
@@ -126,7 +131,7 @@ public class CachedDNSToSwitchMapping extends AbstractDNSToSwitchMapping {
    */
   @Override
   public Map<String, String> getSwitchMap() {
-    Map<String, String > switchMap = new HashMap<String, String>(cache);
+    Map<String, String> switchMap = new HashMap<String, String>(cache);
     return switchMap;
   }
 
@@ -138,7 +143,7 @@ public class CachedDNSToSwitchMapping extends AbstractDNSToSwitchMapping {
 
   /**
    * Delegate the switch topology query to the raw mapping, via
-   * {@link AbstractDNSToSwitchMapping#isMappingSingleSwitch(DNSToSwitchMapping)}
+   * {@link AbstractDNSToSwitchMapping#isMappingSingleSwitch(DNSToSwitchMapping)}.
    * @return true iff the raw mapper is considered single-switch.
    */
   @Override

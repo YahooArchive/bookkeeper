@@ -20,42 +20,42 @@
  */
 package org.apache.bookkeeper.replication;
 
+import static com.google.common.base.Charsets.UTF_8;
+import static org.apache.bookkeeper.replication.ReplicationStats.ELECTION_ATTEMPTS;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.protobuf.TextFormat;
+
+import java.io.IOException;
+import java.io.Serializable;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.io.Serializable;
-import java.io.IOException;
-
-import org.apache.bookkeeper.proto.DataFormats.AuditorVoteFormat;
-import com.google.common.annotations.VisibleForTesting;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.apache.bookkeeper.net.BookieSocketAddress;
 import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.net.BookieSocketAddress;
+import org.apache.bookkeeper.proto.DataFormats.AuditorVoteFormat;
 import org.apache.bookkeeper.replication.ReplicationException.UnavailableException;
 import org.apache.bookkeeper.stats.Counter;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.util.BookKeeperConstants;
+import org.apache.bookkeeper.util.ZkUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
-import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.Watcher.Event.EventType;
 import org.apache.zookeeper.Watcher.Event.KeeperState;
-import org.apache.zookeeper.ZooDefs.Ids;
-import com.google.protobuf.TextFormat;
-import static com.google.common.base.Charsets.UTF_8;
-
+import org.apache.zookeeper.ZooKeeper;
+import org.apache.zookeeper.data.ACL;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static org.apache.bookkeeper.replication.ReplicationStats.ELECTION_ATTEMPTS;
 
 /**
  * Performing auditor election using Apache ZooKeeper. Using ZooKeeper as a
@@ -92,9 +92,11 @@ public class AuditorElector {
 
     // Expose Stats
     private final Counter electionAttempts;
+    private final StatsLogger statsLogger;
+
 
     /**
-     * AuditorElector for performing the auditor election
+     * AuditorElector for performing the auditor election.
      *
      * @param bookieId
      *            - bookie identifier, comprises HostAddress:Port
@@ -111,7 +113,7 @@ public class AuditorElector {
     }
 
     /**
-     * AuditorElector for performing the auditor election
+     * AuditorElector for performing the auditor election.
      *
      * @param bookieId
      *            - bookie identifier, comprises HostAddress:Port
@@ -129,6 +131,7 @@ public class AuditorElector {
         this.bookieId = bookieId;
         this.conf = conf;
         this.zkc = zkc;
+        this.statsLogger = statsLogger;
         this.electionAttempts = statsLogger.getCounter(ELECTION_ATTEMPTS);
         basePath = conf.getZkLedgersRootPath() + '/'
                 + BookKeeperConstants.UNDER_REPLICATION_NODE;
@@ -137,17 +140,18 @@ public class AuditorElector {
         executor = Executors.newSingleThreadExecutor(new ThreadFactory() {
                 @Override
                 public Thread newThread(Runnable r) {
-                    return new Thread(r, "AuditorElector-"+bookieId);
+                    return new Thread(r, "AuditorElector-" + bookieId);
                 }
             });
     }
 
     private void createMyVote() throws KeeperException, InterruptedException {
         if (null == myVote || null == zkc.exists(myVote, false)) {
+            List<ACL> zkAcls = ZkUtils.getACLs(conf);
             AuditorVoteFormat.Builder builder = AuditorVoteFormat.newBuilder()
                 .setBookieId(bookieId);
             myVote = zkc.create(getVotePath(PATH_SEPARATOR + VOTE_PREFIX),
-                    TextFormat.printToString(builder.build()).getBytes(UTF_8), Ids.OPEN_ACL_UNSAFE,
+                    TextFormat.printToString(builder.build()).getBytes(UTF_8), zkAcls,
                     CreateMode.EPHEMERAL_SEQUENTIAL);
         }
     }
@@ -158,9 +162,10 @@ public class AuditorElector {
 
     private void createElectorPath() throws UnavailableException {
         try {
+            List<ACL> zkAcls = ZkUtils.getACLs(conf);
             if (zkc.exists(basePath, false) == null) {
                 try {
-                    zkc.create(basePath, new byte[0], Ids.OPEN_ACL_UNSAFE,
+                    zkc.create(basePath, new byte[0], zkAcls,
                             CreateMode.PERSISTENT);
                 } catch (KeeperException.NodeExistsException nee) {
                     // do nothing, someone else could have created it
@@ -169,7 +174,7 @@ public class AuditorElector {
             if (zkc.exists(getVotePath(""), false) == null) {
                 try {
                     zkc.create(getVotePath(""), new byte[0],
-                            Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                            zkAcls, CreateMode.PERSISTENT);
                 } catch (KeeperException.NodeExistsException nee) {
                     // do nothing, someone else could have created it
                 }
@@ -266,7 +271,7 @@ public class AuditorElector {
 
                             zkc.setData(getVotePath(""),
                                         TextFormat.printToString(builder.build()).getBytes(UTF_8), -1);
-                            auditor = new Auditor(bookieId, conf, zkc);
+                            auditor = new Auditor(bookieId, conf, zkc, statsLogger);
                             auditor.start();
                         } else {
                             // If not an auditor, will be watching to my predecessor and
@@ -304,7 +309,7 @@ public class AuditorElector {
     }
 
     /**
-     * Query zookeeper for the currently elected auditor
+     * Query zookeeper for the currently elected auditor.
      * @return the bookie id of the current auditor
      */
     public static BookieSocketAddress getCurrentAuditor(ServerConfiguration conf, ZooKeeper zk)
@@ -325,11 +330,11 @@ public class AuditorElector {
         AuditorVoteFormat v = builder.build();
         String[] parts = v.getBookieId().split(":");
         return new BookieSocketAddress(parts[0],
-                                       Integer.valueOf(parts[1]));
+                                       Integer.parseInt(parts[1]));
     }
 
     /**
-     * Shutting down AuditorElector
+     * Shutting down AuditorElector.
      */
     public void shutdown() throws InterruptedException {
         synchronized (this) {
@@ -357,6 +362,11 @@ public class AuditorElector {
             return auditor.isRunning();
         }
         return running.get();
+    }
+
+    @Override
+    public String toString() {
+        return "AuditorElector for " + bookieId;
     }
 
     /**

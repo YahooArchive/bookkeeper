@@ -19,19 +19,25 @@
  */
 package org.apache.bookkeeper.replication;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.SortedMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-
 import org.apache.bookkeeper.client.BKException;
 import org.apache.bookkeeper.client.BookKeeper.DigestType;
 import org.apache.bookkeeper.client.BookKeeperTestClient;
 import org.apache.bookkeeper.client.LedgerHandle;
 import org.apache.bookkeeper.client.LedgerHandleAdapter;
 import org.apache.bookkeeper.conf.ServerConfiguration;
+import org.apache.bookkeeper.discover.RegistrationManager;
+import org.apache.bookkeeper.meta.LayoutManager;
 import org.apache.bookkeeper.meta.LedgerManager;
 import org.apache.bookkeeper.meta.LedgerManagerFactory;
 import org.apache.bookkeeper.meta.LedgerUnderreplicationManager;
@@ -50,8 +56,6 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.junit.Assert.*;
-
 /**
  * Integration tests verifies the complete functionality of the
  * Auditor-rereplication process: Auditor will publish the bookie failures,
@@ -69,7 +73,7 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
     private LedgerUnderreplicationManager underReplicationManager;
     private LedgerManager ledgerManager;
 
-    private final String UNDERREPLICATED_PATH = baseClientConf
+    private final String underreplicatedPath = baseClientConf
             .getZkLedgersRootPath() + "/underreplication/ledgers";
 
     public BookieAutoRecoveryTest() throws IOException, KeeperException,
@@ -79,6 +83,7 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
         baseConf.setLedgerManagerFactoryClassName(
                 "org.apache.bookkeeper.meta.HierarchicalLedgerManagerFactory");
         baseConf.setOpenLedgerRereplicationGracePeriod(openLedgerRereplicationGracePeriod);
+        baseConf.setRwRereplicateBackoffMs(500);
         baseClientConf.setLedgerManagerFactoryClassName(
                 "org.apache.bookkeeper.meta.HierarchicalLedgerManagerFactory");
         this.digestType = DigestType.MAC;
@@ -89,12 +94,20 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
     public void setUp() throws Exception {
         super.setUp();
         baseConf.setZkServers(zkUtil.getZooKeeperConnectString());
+        baseClientConf.setZkServers(zkUtil.getZooKeeperConnectString());
         // initialize urReplicationManager
-        mFactory = LedgerManagerFactory.newLedgerManagerFactory(baseClientConf,
-                zkc);
+        LayoutManager layoutManager = RegistrationManager
+            .instantiateRegistrationManager(new ServerConfiguration(baseClientConf)).getLayoutManager();
+
+        mFactory = LedgerManagerFactory
+            .newLedgerManagerFactory(
+                baseClientConf,
+                layoutManager);
         underReplicationManager = mFactory.newLedgerUnderreplicationManager();
         LedgerManagerFactory newLedgerManagerFactory = LedgerManagerFactory
-                .newLedgerManagerFactory(baseClientConf, zkc);
+            .newLedgerManagerFactory(
+                baseClientConf,
+                layoutManager);
         ledgerManager = newLedgerManagerFactory.newLedgerManager();
     }
 
@@ -102,7 +115,7 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
     public void tearDown() throws Exception {
         super.tearDown();
         if (null != mFactory) {
-            mFactory.uninitialize();
+            mFactory.close();
             mFactory = null;
         }
         if (null != underReplicationManager) {
@@ -117,9 +130,9 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
 
     /**
      * Test verifies publish urLedger by Auditor and replication worker is
-     * picking up the entries and finishing the rereplication of open ledger
+     * picking up the entries and finishing the rereplication of open ledger.
      */
-    @Test(timeout = 90000)
+    @Test
     public void testOpenLedgers() throws Exception {
         List<LedgerHandle> listOfLedgerHandle = createLedgersAndAddEntries(1, 5);
         LedgerHandle lh = listOfLedgerHandle.get(0);
@@ -164,9 +177,9 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
 
     /**
      * Test verifies publish urLedger by Auditor and replication worker is
-     * picking up the entries and finishing the rereplication of closed ledgers
+     * picking up the entries and finishing the rereplication of closed ledgers.
      */
-    @Test(timeout = 90000)
+    @Test
     public void testClosedLedgers() throws Exception {
         List<Integer> listOfReplicaIndex = new ArrayList<Integer>();
         List<LedgerHandle> listOfLedgerHandle = createLedgersAndAddEntries(1, 5);
@@ -227,7 +240,7 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
      * when there is an exception will shutdown Auditor and RW processes. After
      * restarting should be able to finish the re-replication activities
      */
-    @Test(timeout = 90000)
+    @Test
     public void testStopWhileReplicationInProgress() throws Exception {
         int numberOfLedgers = 2;
         List<Integer> listOfReplicaIndex = new ArrayList<Integer>();
@@ -304,9 +317,9 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
     /**
      * Verify the published urledgers of deleted ledgers(those ledgers where
      * deleted after publishing as urledgers by Auditor) should be cleared off
-     * by the newly selected replica bookie
+     * by the newly selected replica bookie.
      */
-    @Test(timeout = 30000)
+    @Test
     public void testNoSuchLedgerExists() throws Exception {
         List<LedgerHandle> listOfLedgerHandle = createLedgersAndAddEntries(2, 5);
         CountDownLatch latch = new CountDownLatch(listOfLedgerHandle.size());
@@ -350,7 +363,7 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
      * Test that if a empty ledger loses the bookie not in the quorum for entry 0, it will
      * still be openable when it loses enough bookies to lose a whole quorum.
      */
-    @Test(timeout=10000)
+    @Test
     public void testEmptyLedgerLosesQuorumEventually() throws Exception {
         LedgerHandle lh = bkc.createLedger(3, 2, 2, DigestType.CRC32, PASSWD);
         CountDownLatch latch = new CountDownLatch(1);
@@ -393,9 +406,9 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
 
     /**
      * Test verifies bookie recovery, the host (recorded via ipaddress in
-     * ledgermetadata)
+     * ledgermetadata).
      */
-    @Test(timeout = 90000)
+    @Test
     public void testLedgerMetadataContainsIpAddressAsBookieID()
             throws Exception {
         stopBKCluster();
@@ -422,7 +435,7 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
         final ArrayList<BookieSocketAddress> bkAddresses = ensembles.get(0L);
         BookieSocketAddress replicaToKillAddr = bkAddresses.get(0);
         for (BookieSocketAddress bookieSocketAddress : bkAddresses) {
-            if(!isCreatedFromIp(bookieSocketAddress)){
+            if (!isCreatedFromIp(bookieSocketAddress)){
                 replicaToKillAddr = bookieSocketAddress;
                 LOG.info("Kill bookie which has registered using hostname");
                 break;
@@ -471,9 +484,9 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
 
     /**
      * Test verifies bookie recovery, the host (recorded via useHostName in
-     * ledgermetadata)
+     * ledgermetadata).
      */
-    @Test(timeout = 90000)
+    @Test
     public void testLedgerMetadataContainsHostNameAsBookieID()
             throws Exception {
         stopBKCluster();
@@ -550,8 +563,7 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
 
     }
 
-    private int getReplicaIndexInLedger(LedgerHandle lh,
- BookieSocketAddress replicaToKill) {
+    private int getReplicaIndexInLedger(LedgerHandle lh, BookieSocketAddress replicaToKill) {
         SortedMap<Long, ArrayList<BookieSocketAddress>> ensembles = LedgerHandleAdapter
                 .getLedgerMetadata(lh).getEnsembles();
         int ledgerReplicaIndex = -1;
@@ -602,7 +614,7 @@ public class BookieAutoRecoveryTest extends BookKeeperClusterTestCase {
 
     private String getUrLedgerZNode(LedgerHandle lh) {
         return ZkLedgerUnderreplicationManager.getUrLedgerZnode(
-                UNDERREPLICATED_PATH, lh.getId());
+                underreplicatedPath, lh.getId());
     }
 
     private Stat watchUrLedgerNode(final String znode,

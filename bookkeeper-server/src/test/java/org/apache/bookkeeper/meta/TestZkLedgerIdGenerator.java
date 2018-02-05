@@ -29,6 +29,7 @@ import junit.framework.TestCase;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.test.ZooKeeperUtil;
 import org.apache.zookeeper.KeeperException.Code;
+import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.ZooKeeper;
 import org.junit.After;
 import org.junit.Before;
@@ -36,6 +37,9 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Test the ZK ledger id generator.
+ */
 public class TestZkLedgerIdGenerator extends TestCase {
     private static final Logger LOG = LoggerFactory.getLogger(TestZkLedgerIdGenerator.class);
 
@@ -55,7 +59,7 @@ public class TestZkLedgerIdGenerator extends TestCase {
         zk = zkutil.getZooKeeperClient();
 
         ledgerIdGenerator = new ZkLedgerIdGenerator(zk,
-                "/test-zk-ledger-id-generator", "idgen");
+                "/test-zk-ledger-id-generator", "idgen", ZooDefs.Ids.OPEN_ACL_UNSAFE);
     }
 
     @Override
@@ -69,13 +73,13 @@ public class TestZkLedgerIdGenerator extends TestCase {
         super.tearDown();
     }
 
-    @Test(timeout=60000)
+    @Test
     public void testGenerateLedgerId() throws Exception {
         // Create *nThread* threads each generate *nLedgers* ledger id,
         // and then check there is no identical ledger id.
         final int nThread = 2;
         final int nLedgers = 2000;
-        final CountDownLatch countDownLatch = new CountDownLatch(nThread*nLedgers);
+        final CountDownLatch countDownLatch = new CountDownLatch(nThread * nLedgers);
 
         final AtomicInteger errCount = new AtomicInteger(0);
         final ConcurrentLinkedQueue<Long> ledgerIds = new ConcurrentLinkedQueue<Long>();
