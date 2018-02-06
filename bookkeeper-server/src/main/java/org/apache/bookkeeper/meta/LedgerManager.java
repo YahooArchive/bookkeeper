@@ -90,6 +90,20 @@ public interface LedgerManager extends Closeable {
     public void readLedgerMetadata(long ledgerId, GenericCallback<LedgerMetadata> readCb);
 
     /**
+     * Check ledger metadata exists for a specified ledger.
+     *
+     * @param ledgerId
+     *          Ledger Id
+     * @param readCb
+     *          Callback when read ledger metadata. Return code:<ul>
+     *          <li>{@link BKException.Code.OK} if success</li>
+     *          <li>{@link BKException.Code.NoSuchLedgerExistsException} if ledger not exist</li>
+     *          <li>{@link BKException.Code.ZKException} for other issue</li>
+     *          </ul>
+     */
+    void existsLedgerMetadata(long ledgerId, GenericCallback<Boolean> callback);
+    
+    /**
      * Write ledger metadata.
      *
      * @param ledgerId

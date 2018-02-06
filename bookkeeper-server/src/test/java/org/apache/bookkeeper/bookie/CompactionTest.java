@@ -528,6 +528,10 @@ public class CompactionTest extends BookKeeperClusterTestCase {
                         }
                     };
                  }
+                @Override
+                public void existsLedgerMetadata(long ledgerId, GenericCallback<Boolean> callback) {
+                    unsupported();
+                }
             };
         }
 

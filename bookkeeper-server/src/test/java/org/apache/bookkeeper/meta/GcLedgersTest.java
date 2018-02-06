@@ -53,8 +53,11 @@ import org.apache.bookkeeper.meta.LedgerManager.LedgerRangeIterator;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.GenericCallback;
 import org.apache.bookkeeper.versioning.Version;
 import org.junit.Test;
+import org.mockito.Mockito;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.Sets;
 
 /**
  * Test garbage collection ledgers in ledger manager
@@ -290,6 +293,66 @@ public class GcLedgersTest extends LedgerManagerTestCase {
         }
 
         assertEquals(createdLedgers, scannedLedgers);
+
+        garbageCollector.gc(cleaner);
+        assertTrue("Should have cleaned nothing", cleaned.isEmpty());
+
+        long first = createdLedgers.first();
+        removeLedger(first);
+        garbageCollector.gc(cleaner);
+        assertEquals("Should have cleaned something", 1, cleaned.size());
+        assertEquals("Should have cleaned first ledger" + first, (long) first, (long) cleaned.get(0));
+    }
+
+    /**
+     * It verifies that GC doesn't delete ledgers which are not deleted and its metadata present into zookeeper even
+     * though ledgerManager derives active ledger as deleted.
+     * 
+     * <pre>
+     *  1. Create list of ledgers
+     *  2. Mock ledgerManager that derives live ledgers as deleted ledgers
+     *  3. GC performs sanity before deleting ledger and doesn't delete if ledger metadata present
+     * </pre>
+     * 
+     * @throws Exception
+     */
+    @Test(timeout = 120000)
+    public void testGCTryToDeleteActiveLedgers() throws Exception {
+        final SortedSet<Long> createdLedgers = Collections.synchronizedSortedSet(new TreeSet<Long>());
+        final List<Long> cleaned = new ArrayList<Long>();
+
+        final int numLedgers = 100;
+
+        createLedgers(numLedgers, createdLedgers);
+
+        LedgerManager ledgerManager = Mockito.spy(getLedgerManager());
+        LedgerRange range = new LedgerRange(Sets.newHashSet(createdLedgers.first()));
+        AtomicInteger noOfIterations = new AtomicInteger(1);
+
+        LedgerRangeIterator ledgerRangeIterator = new LedgerRangeIterator() {
+            @Override
+            public boolean hasNext() throws IOException {
+                return noOfIterations.get() > 0;
+            }
+
+            @Override
+            public LedgerRange next() throws IOException {
+                noOfIterations.decrementAndGet();
+                return range;
+            }
+        };
+
+        Mockito.doReturn(ledgerRangeIterator).when(ledgerManager).getLedgerRanges();
+
+        final GarbageCollector garbageCollector = new ScanAndCompareGarbageCollector(ledgerManager,
+                new MockLedgerStorage(), null, null, false, baseConf.getZkLedgersRootPath());
+        GarbageCollector.GarbageCleaner cleaner = new GarbageCollector.GarbageCleaner() {
+            @Override
+            public void clean(long ledgerId) {
+                LOG.info("Cleaned {}", ledgerId);
+                cleaned.add(ledgerId);
+            }
+        };
 
         garbageCollector.gc(cleaner);
         assertTrue("Should have cleaned nothing", cleaned.isEmpty());

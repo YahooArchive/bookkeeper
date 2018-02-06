@@ -22,7 +22,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
@@ -37,7 +36,6 @@ import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.LedgerMetadataLis
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.MultiCallback;
 import org.apache.bookkeeper.proto.BookkeeperInternalCallbacks.Processor;
 import org.apache.bookkeeper.util.BookKeeperConstants;
-import org.apache.bookkeeper.util.StringUtils;
 import org.apache.bookkeeper.util.ZkUtils;
 import org.apache.bookkeeper.versioning.Version;
 import org.apache.zookeeper.AsyncCallback;
@@ -350,6 +348,23 @@ abstract class AbstractZkLedgerManager implements LedgerManager, Watcher {
         readLedgerMetadata(ledgerId, readCb, null);
     }
 
+    @Override
+    public void existsLedgerMetadata(final long ledgerId, final GenericCallback<Boolean> callback) {
+        zk.exists(getLedgerPath(ledgerId), false, (int rc, String path, Object ctx, Stat stat) -> {
+            if (rc == KeeperException.Code.NONODE.intValue()) {
+                callback.operationComplete(BKException.Code.NoSuchLedgerExistsException, false);
+                return;
+            } else if (rc != KeeperException.Code.OK.intValue()) {
+                LOG.error("Could not check metadata exists for ledger: " + ledgerId,
+                        KeeperException.create(KeeperException.Code.get(rc), path));
+                callback.operationComplete(BKException.Code.ZKException, false);
+                return;
+            } else {
+                callback.operationComplete(BKException.Code.OK, true);
+            }
+        }, null);
+    }
+    
     protected void readLedgerMetadata(final long ledgerId, final GenericCallback<LedgerMetadata> readCb,
                                       Watcher watcher) {
         zk.getData(getLedgerPath(ledgerId), watcher, new DataCallback() {

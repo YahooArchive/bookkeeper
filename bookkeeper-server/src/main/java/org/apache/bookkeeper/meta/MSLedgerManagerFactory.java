@@ -421,6 +421,30 @@ public class MSLedgerManagerFactory extends LedgerManagerFactory {
         }
 
         @Override
+        public void existsLedgerMetadata(final long ledgerId, final GenericCallback<Boolean> callback) {
+            final String key = ledgerId2Key(ledgerId);
+            MetastoreCallback<Versioned<Value>> msCallback = new MetastoreCallback<Versioned<Value>>() {
+                @Override
+                public void complete(int rc, Versioned<Value> value, Object ctx) {
+                    if (MSException.Code.NoKey.getCode() == rc) {
+                        LOG.error("No ledger metadata found for ledger " + ledgerId + " : ",
+                                MSException.create(MSException.Code.get(rc), "No key " + key + " found."));
+                        callback.operationComplete(BKException.Code.NoSuchLedgerExistsException, false);
+                        return;
+                    } else if (MSException.Code.OK.getCode() != rc) {
+                        LOG.error("Could not read metadata for ledger " + ledgerId + " : ",
+                                MSException.create(MSException.Code.get(rc), "Failed to get key " + key));
+                        callback.operationComplete(BKException.Code.MetaStoreException, false);
+                        return;
+                    } else {
+                        callback.operationComplete(BKException.Code.OK, true);
+                    }
+                }
+            };
+            ledgerTable.get(key, this, msCallback, ALL_FIELDS);
+        }
+
+        @Override
         public void writeLedgerMetadata(final long ledgerId, final LedgerMetadata metadata,
                 final GenericCallback<Void> cb) {
             Value data = new Value().setField(META_FIELD, metadata.serialize());
