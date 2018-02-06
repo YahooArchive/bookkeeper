@@ -23,6 +23,8 @@ package org.apache.bookkeeper.bookie;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -566,6 +568,69 @@ public class CompactionTest extends BookKeeperClusterTestCase {
         double threshold = 0.1;
         // shouldn't throw exception
         storage.gcThread.doCompactEntryLogs(threshold);
+    }
+
+    /**
+     * Test extractMetaFromEntryLogs optimized method to avoid excess memory usage.
+     */
+    @Test(timeout = 60000)
+    public void testExtractMetaFromEntryLogs() throws Exception {
+        tearDown(); // I dont want the test infrastructure
+        ServerConfiguration conf = TestBKConfiguration.newServerConfiguration();
+        File tmpDir = createTempDir("bkTest", ".dir");
+        File curDir = Bookie.getCurrentDirectory(tmpDir);
+        Bookie.checkDirectoryStructure(curDir);
+        conf.setLedgerDirNames(new String[] { tmpDir.toString() });
+
+        LedgerDirsManager dirs = new LedgerDirsManager(conf, conf.getLedgerDirs());
+        final Set<Long> ledgers = Collections
+            .newSetFromMap(new ConcurrentHashMap<Long, Boolean>());
+
+        LedgerManager manager = getLedgerManager(ledgers);
+
+        CheckpointSource checkpointSource = new CheckpointSource() {
+
+            @Override
+            public Checkpoint newCheckpoint() {
+                return null;
+            }
+
+            @Override
+            public void checkpointComplete(Checkpoint checkpoint,
+                                           boolean compact) throws IOException {
+            }
+        };
+        InterleavedLedgerStorage storage = new InterleavedLedgerStorage();
+        storage.initialize(conf, manager, dirs, dirs, checkpointSource, NullStatsLogger.INSTANCE);
+        final byte[] KEY = "foobar".getBytes();
+
+        for (long ledger = 0; ledger <= 10; ledger++) {
+            ledgers.add(ledger);
+            for(int entry = 1; entry <= 50; entry++) {
+                try {
+                    storage.addEntry(genEntry(ledger, entry, ENTRY_SIZE));
+                } catch (IOException e) {
+                    //ignore exception on failure to add entry.
+                }
+            };
+        };
+
+        storage.flush();
+        storage.shutdown();
+
+        storage = new InterleavedLedgerStorage();
+        storage.initialize(conf, manager, dirs, dirs, checkpointSource, NullStatsLogger.INSTANCE);
+
+        long startingEntriesCount = storage.gcThread.entryLogger.getLeastUnflushedLogId() - storage.gcThread.scannedLogId;
+        LOG.info("The old Log Entry count is: " + startingEntriesCount);
+
+        Map<Long, EntryLogMetadata> entryLogMetaData = new HashMap<>();
+        Map<Long, EntryLogMetadata> finalEntryLogMetadataMap = storage.gcThread.extractMetaFromEntryLogs(entryLogMetaData);
+        long finalEntriesCount = storage.gcThread.entryLogger.getLeastUnflushedLogId() - storage.gcThread.scannedLogId;
+        LOG.info("The latest Log Entry count is: " + finalEntriesCount);
+
+        assertTrue("The GC did not clean up entries...", startingEntriesCount != finalEntriesCount);
+        assertTrue("Entries Count is zero", finalEntriesCount == 0);
     }
 
     private ByteBuffer genEntry(long ledger, long entry, int size) {
