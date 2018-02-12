@@ -575,7 +575,6 @@ public class CompactionTest extends BookKeeperClusterTestCase {
      */
     @Test(timeout = 60000)
     public void testExtractMetaFromEntryLogs() throws Exception {
-        tearDown(); // I dont want the test infrastructure
         ServerConfiguration conf = TestBKConfiguration.newServerConfiguration();
         File tmpDir = createTempDir("bkTest", ".dir");
         File curDir = Bookie.getCurrentDirectory(tmpDir);
