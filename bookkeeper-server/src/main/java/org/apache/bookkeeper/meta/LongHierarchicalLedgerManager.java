@@ -230,7 +230,8 @@ class LongHierarchicalLedgerManager extends AbstractHierarchicalLedgerManager {
                 }
             }
             String curLNode = curLevelNodes.get(level);
-            if (curLNode != null) {
+            // If no level 3 nodes are present then go to the next node in level 2
+            if (curLNode != null || moveToNext(level)) {
                 // Traverse down through levels 0-3
                 // The nextRange becomes a listing of the children
                 // in the level4 directory.
