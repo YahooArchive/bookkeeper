@@ -333,11 +333,19 @@ class LongHierarchicalLedgerManager extends AbstractHierarchicalLedgerManager {
         }
 
         private LedgerRange getLedgerRangeByLevel(List<String> curLevelNodes) throws IOException {
+            if (curLevelNodes.size() < 4) {
+                return  null;
+            }
+            
             String level0 = curLevelNodes.get(0);
             String level1 = curLevelNodes.get(1);
             String level2 = curLevelNodes.get(2);
             String level3 = curLevelNodes.get(3);
-
+            
+            if (level0 == null || level1 == null || level2 == null || level3 == null) {
+                return  null;
+            }
+            
             StringBuilder nodeBuilder = new StringBuilder();
             nodeBuilder.append(ledgerRootPath).append("/").append(level0).append("/").append(level1).append("/")
                     .append(level2).append("/").append(level3);
